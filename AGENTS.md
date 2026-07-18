@@ -39,5 +39,6 @@ clanker-v2/
 - The reverse-engineered Shipwrights Dashboard API reference is at
   [`AI/context/API.md`](./AI/context/API.md). Treat endpoints marked `[MUTATING]` with care:
   never call them without explicit human sign-off.
-- v2 goals and planned improvements: [`AI/context/v2-roadmap.md`](./AI/context/v2-roadmap.md).
+- There is currently **no v2 roadmap/plan** — an earlier agent-inferred one was scrapped
+  (see journal `2026-07-18-02`). Do not treat inferred goals as requirements; ask the human.
 - Never commit `.env` files or real secrets/tokens/cookies.

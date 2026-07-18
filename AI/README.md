@@ -12,8 +12,7 @@ AI/
 ├── context/            ← stable reference knowledge
 │   ├── API.md              reverse-engineered Shipwrights Dashboard API (the bot's toolbox)
 │   ├── v1-architecture.md  how sw-clanker v1 works (the thing we're rewriting)
-│   ├── v1-pain-points.md   what's wrong with v1 → what v2 must fix
-│   └── v2-roadmap.md       goals & planned improvements for v2
+│   └── v1-pain-points.md   observed issues in v1 (facts, not a v2 plan)
 ├── journal/            ← append-only log of agent activity (ONE NEW FILE PER WORK UNIT)
 └── notes/              ← free-form scratch space: research, decisions, snippets, anything
 ```

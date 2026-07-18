@@ -1,7 +1,7 @@
-# sw-clanker v1 — pain points (why v2 exists)
+# sw-clanker v1 — pain points
 
-Ordered roughly by impact. Each item links to the roadmap fix in
-[`v2-roadmap.md`](./v2-roadmap.md).
+Observed issues in the v1 code, ordered roughly by impact. These are facts about v1,
+**not** a v2 plan — what v2 does about them is decided by the human, not inferred here.
 
 ## Functional gaps
 
