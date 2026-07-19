@@ -30,9 +30,9 @@ def create_slack_app(settings: Settings, chat_agent: Agent) -> AsyncApp:
 
     @app.event("app_mention")
     async def handle_app_mention(event: dict, client, context: AsyncBoltContext):
+        # Respond to @mentions in any channel the bot is in (the SLACK_CHANNEL
+        # setting only controls where the watcher posts ship announcements).
         channel_id = event["channel"]
-        if channel_id != settings.slack_channel:
-            return
 
         user_message = _MENTION_RE.sub("", event.get("text", "")).strip()
         files = event.get("files")

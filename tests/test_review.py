@@ -137,7 +137,7 @@ async def test_fetch_page_text_reports_reachability():
 
     tools = ReviewTools()
     tools._web = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-    payload = json.loads(await tools.review_fetch_page_text("https://example.up.railway.app/"))
+    payload = json.loads(await tools.fetch_page_text("https://example.up.railway.app/"))
     assert payload["ok"] is True
     assert payload["reachable"] is True
     assert payload["status_code"] == 200
@@ -155,7 +155,7 @@ async def test_render_page_rejects_invalid_url():
 
 async def test_render_tool_without_renderer_errors():
     tools = ReviewTools()
-    payload = json.loads(await tools.review_render_page("https://example.com"))
+    payload = json.loads(await tools.render_page("https://example.com"))
     assert payload["ok"] is False
     assert "not available" in payload["error"]
     await tools.aclose()
@@ -328,7 +328,7 @@ async def test_review_agent_uses_prompted_output_and_keeps_tools_optional():
 
 async def test_web_search_requires_key():
     tools = ReviewTools()
-    payload = json.loads(await tools.review_web_search("what is somehost.io"))
+    payload = json.loads(await tools.web_search("what is somehost.io"))
     assert payload["ok"] is False
     assert "not available" in payload["error"]
     await tools.aclose()
@@ -360,7 +360,7 @@ async def test_web_search_returns_trimmed_results():
     tools = ReviewTools(hackclub_ai_key="hc-key")
     tools._web = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     payload = json.loads(
-        await tools.review_web_search("is somehost.io a tunnel service", num_results=3)
+        await tools.web_search("is somehost.io a tunnel service", num_results=3)
     )
     assert payload["ok"] is True
     assert payload["results"] == [

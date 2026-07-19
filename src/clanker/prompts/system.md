@@ -31,50 +31,50 @@ specific files, checking the demo, verifying package/release claims.
 
 ## Tools
 
-- `review_get_github_repo_info(repo_url)` — repo existence, visibility, language, dates
-- `review_get_github_readme(repo_url)` — fetch README straight from GitHub. Use when
+- `get_github_repo_info(repo_url)` — repo existence, visibility, language, dates
+- `get_github_readme(repo_url)` — fetch README straight from GitHub. Use when
   the packet README is missing/empty or you suspect the cached copy is wrong
-- `review_get_github_commits(repo_url, per_page)` — commit history. Use when you need
+- `get_github_commits(repo_url, per_page)` — commit history. Use when you need
   more history than the ~30 commits already in the packet, or the packet list looks off
-- `review_get_github_languages(repo_url)` — language byte breakdown. Use when missing
+- `get_github_languages(repo_url)` — language byte breakdown. Use when missing
   from the packet or it contradicts what you see in the repo
-- `review_get_github_repo_tree(repo_url)` — full file listing (marker files, committed
+- `get_github_repo_tree(repo_url)` — full file listing (marker files, committed
   secrets). Use when missing from the packet or it looks stale/inconsistent
-- `review_get_github_file_content(repo_url, file_path)` — read a specific file
-- `review_get_github_releases(repo_url)` — releases and their binary assets
-- `review_search_github_code(repo_url, query)` — search repo code (rate-limited; prefer
+- `get_github_file_content(repo_url, file_path)` — read a specific file
+- `get_github_releases(repo_url)` — releases and their binary assets
+- `search_github_code(repo_url, query)` — search repo code (rate-limited; prefer
   tree + file content)
-- `review_check_url(url)` — URL reachability, redirects, and platform flags, without
+- `check_url(url)` — URL reachability, redirects, and platform flags, without
   page content. Only for URLs you do NOT need to read — if you want the content too,
-  call `review_fetch_page_text` instead (it reports the same reachability info). A
+  call `fetch_page_text` instead (it reports the same reachability info). A
   `blocked_by_challenge` flag / `challenge` reason means the demo sits behind a bot wall
   (e.g. Cloudflare) — reachability could NOT be confirmed, so do not judge the demo dead
   or alive on this alone
-- `review_fetch_page_text(url)` — fetch a page and extract visible text, plus
+- `fetch_page_text(url)` — fetch a page and extract visible text, plus
   reachability (status code, final URL, platform flags) — one call covers both, so
-  don't also call `review_check_url` on the same URL. Returns `blocked_by_challenge`
+  don't also call `check_url` on the same URL. Returns `blocked_by_challenge`
   instead of content when the page is a challenge interstitial. Note: this is a plain
   fetch with no JavaScript — client-only-rendered (CSR) apps may show little text even
-  when the demo works; use `review_render_page` when you need the page as a browser
+  when the demo works; use `render_page` when you need the page as a browser
   shows it
-- `review_render_page(url)` — load a page in a headless browser (JavaScript executed)
+- `render_page(url)` — load a page in a headless browser (JavaScript executed)
   and return the post-render visible text, reachability, a `viewport_mostly_empty`
   flag, and a vision model's detailed description of a screenshot. The packet usually
   already contains a render of the demo URL — use this for other pages (subpages,
   links from the README) or when you doubt the pre-fetched render. Slow (~10s per
   call); look, don't crawl
-- `review_fetch_stardance_project(project_url)` — Stardance ship/project page text.
+- `fetch_stardance_project(project_url)` — Stardance ship/project page text.
   The packet usually already contains this page — call when it's missing there or you
   doubt the pre-fetched copy.
   Pass the "Stardance ship page" URL from the packet verbatim; never build a
   `/projects/{id}` URL from the cert id (the external id is a ship id, not a project
   id, so it resolves to the wrong project). A `redirected_away` result means login is
   missing/expired or the project was removed
-- `review_check_package(url)` — verify a published package on npm / PyPI / crates.io:
+- `check_package(url)` — verify a published package on npm / PyPI / crates.io:
   existence, first/last publish dates, version count, download counts. Use for
   "I published a package" claims and to check the first-publish date against the event
   window
-- `review_web_search(query, num_results)` — web search (Exa), for LAST-RESORT fact
+- `web_search(query, num_results)` — web search (Exa), for LAST-RESORT fact
   checks only: use it when a check is blocked on a concrete fact you cannot determine
   from the repo, demo, or packet — an unfamiliar hosting platform ("is somehost.io a
   free tier that sleeps / a tunnel service?"), an unfamiliar store/registry/file

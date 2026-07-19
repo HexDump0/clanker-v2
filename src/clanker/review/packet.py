@@ -147,7 +147,7 @@ class ReviewPacket:
                 readme = readme[:README_LIMIT] + f"\n\n... (truncated from {original} chars)"
             lines += ["", "```markdown", readme, "```"]
         else:
-            lines.append("(README missing or empty — verify with review_get_github_readme)")
+            lines.append("(README missing or empty — verify with get_github_readme)")
 
         return "\n".join(lines)
 
@@ -184,13 +184,13 @@ async def build_packet(
     async def get_tree() -> dict[str, Any] | None:
         if not (tools and cert.repo_url):
             return None
-        payload = await _tool_payload(tools.review_get_github_repo_tree(cert.repo_url))
+        payload = await _tool_payload(tools.get_github_repo_tree(cert.repo_url))
         return payload if payload and payload.get("ok") else None
 
     async def get_languages() -> dict[str, Any] | None:
         if not (tools and cert.repo_url):
             return None
-        payload = await _tool_payload(tools.review_get_github_languages(cert.repo_url))
+        payload = await _tool_payload(tools.get_github_languages(cert.repo_url))
         return payload if payload and payload.get("ok") else None
 
     async def get_demo_render() -> dict[str, Any] | None:
@@ -198,7 +198,7 @@ async def build_packet(
             return None
         # A failed render (no browser, timeout) isn't evidence either way — the
         # agent still has render/fetch tools; only ship useful payloads.
-        payload = await _tool_payload(tools.review_render_page(cert.demo_url))
+        payload = await _tool_payload(tools.render_page(cert.demo_url))
         return payload if payload and payload.get("ok") else None
 
     async def get_stardance() -> dict[str, Any] | None:
@@ -206,7 +206,7 @@ async def build_packet(
             return None
         url = f"{STARDANCE_SHIP_BASE}/{cert.external_id}?via=dashboard"
         # Keep non-ok payloads: redirected_away is a review signal, not a fetch bug.
-        return await _tool_payload(tools.review_fetch_stardance_project(url))
+        return await _tool_payload(tools.fetch_stardance_project(url))
 
     github, readme, tree, languages, stardance, demo_render = await asyncio.gather(
         get_github(), get_readme(), get_tree(), get_languages(), get_stardance(),

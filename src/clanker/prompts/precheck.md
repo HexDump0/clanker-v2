@@ -11,12 +11,12 @@ items below in this stage — nothing else.
    downstream checks including demo validation.
 
    **How to detect** — cross-reference ALL of these signals; no single signal is definitive:
-   - **Repo files** (`review_get_github_repo_tree`): marker files — `package.json`
+   - **Repo files** (`get_github_repo_tree`): marker files — `package.json`
      (web/node), `.sln`/`.csproj` (desktop), `AndroidManifest.xml` (Android),
      `Podfile`/`.xcodeproj` (iOS), `Cargo.toml` (Rust CLI/lib), `setup.py`/`pyproject.toml`
      (Python lib/CLI), Unity/Godot project files (game), Arduino/KiCad files (hardware),
      `manifest.json` in extension-like structure (browser extension), etc.
-   - **Languages** (`review_get_github_languages`): a Python repo could be a web app
+   - **Languages** (`get_github_languages`): a Python repo could be a web app
      (Flask/Django), CLI tool, or library depending on other signals.
    - **README content** (in the packet): the description often states what it is
      ("a Discord bot", "a Chrome extension", "a portfolio website").
@@ -27,25 +27,25 @@ items below in this stage — nothing else.
    **If the claimed type conflicts with what you detect**, always use YOUR detected
    type and set `type_mismatch: true`.
 
-2. **Repo accessibility**: confirm via `review_get_github_repo_info` that the repository
+2. **Repo accessibility**: confirm via `get_github_repo_info` that the repository
    exists and is public. A 404 or private repo is an instant reject.
 
 3. **README existence**: the packet includes the README if the dashboard could fetch
-   it. If it's missing or empty, double-check with `review_get_github_readme` before
+   it. If it's missing or empty, double-check with `get_github_readme` before
    concluding. No README is an instant reject.
 
-4. **Demo URL reachability**: if a demo URL was provided, `review_check_url` it and
+4. **Demo URL reachability**: if a demo URL was provided, `check_url` it and
    record whether it responds without error (2xx/3xx). Do NOT test functionality.
 
 5. **Resubmission spam detection** (flag): check the prior reviews in the packet. If
    the same project has been rejected 3+ times for the same or substantially similar
    issues, check whether there were commits AFTER the most recent rejection
-   (`review_get_github_commits`). Commits after the last rejection = benefit of the
+   (`get_github_commits`). Commits after the last rejection = benefit of the
    doubt, do NOT flag. Only flag if there are no post-rejection commits or they are
    trivial (README-only). Not an instant reject — record it for the verdict stage.
 
 6. **Demo URL early screening** (flag): record matches against problematic patterns
-   (`review_check_url` flags these automatically): Google Drive, Google Colab,
+   (`check_url` flags these automatically): Google Drive, Google Colab,
    Hugging Face, Kaggle, `*.onrender.com`, `*.up.railway.app`, ngrok, localhost.
 
 ## Instant reject conditions

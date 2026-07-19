@@ -44,7 +44,7 @@ def create_vision_agent(settings: Settings) -> Agent:
 class PageRenderer:
     """Render a page in headless Chromium and describe its screenshot.
 
-    Produces the JSON-able payload shared by the ``review_render_page`` tool
+    Produces the JSON-able payload shared by the ``render_page`` tool
     and the packet's pre-fetched demo render section.
     """
 
