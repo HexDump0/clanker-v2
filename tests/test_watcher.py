@@ -46,6 +46,23 @@ async def test_state_survives_restart(client, dashboard, tmp_path):
     assert [c.id for c in fresh] == ["c2"]
 
 
+async def test_unchanged_queue_costs_one_request(client, dashboard, tmp_path):
+    dashboard.set_pending([make_cert(f"c{i}") for i in range(120)], per_page=50)  # 3 pages
+    watcher = Watcher(client, state_file=tmp_path / "state.json")
+    await watcher.poll_once()  # first run: full walk
+
+    dashboard.requests.clear()
+    assert await watcher.poll_once() == []
+    assert len(dashboard.requests) == 1  # fingerprint unchanged -> page 1 only
+
+    # a new cert changes the total -> full walk again, new cert emitted
+    dashboard.set_pending([make_cert(f"c{i}") for i in range(121)], per_page=50)
+    dashboard.requests.clear()
+    fresh = await watcher.poll_once()
+    assert [c.id for c in fresh] == ["c120"]
+    assert len(dashboard.requests) == 3
+
+
 def test_corrupt_state_starts_fresh(tmp_path):
     state_file = tmp_path / "state.json"
     state_file.write_text("{not json")

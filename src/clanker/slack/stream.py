@@ -130,51 +130,55 @@ async def run_agent_streaming(
     try:
         result_event = None
 
-        async for event in agent.run_stream_events(user_content, message_history=message_history):
-            if isinstance(event, AgentRunResultEvent):
-                result_event = event
+        # pydantic-ai 2.x: run_stream_events is an async context manager.
+        async with agent.run_stream_events(
+            user_content, message_history=message_history
+        ) as event_stream:
+            async for event in event_stream:
+                if isinstance(event, AgentRunResultEvent):
+                    result_event = event
 
-            elif isinstance(event, PartStartEvent):
-                if isinstance(event.part, TextPart) and event.part.content:
-                    text_buffer += event.part.content
-                    await maybe_flush()
+                elif isinstance(event, PartStartEvent):
+                    if isinstance(event.part, TextPart) and event.part.content:
+                        text_buffer += event.part.content
+                        await maybe_flush()
 
-            elif isinstance(event, PartDeltaEvent):
-                if isinstance(event.delta, TextPartDelta):
-                    text_buffer += event.delta.content_delta
-                    await maybe_flush()
+                elif isinstance(event, PartDeltaEvent):
+                    if isinstance(event.delta, TextPartDelta):
+                        text_buffer += event.delta.content_delta
+                        await maybe_flush()
 
-            elif isinstance(event, FunctionToolCallEvent):
-                await flush_text()
-                tool_id_counter += 1
-                call_id = event.part.tool_call_id or f"tool_{tool_id_counter}"
-                await safe_append(
-                    chunks=[
-                        TaskUpdateChunk(
-                            id=call_id,
-                            title=f"Calling {event.part.tool_name}...",
-                            status="in_progress",
-                        )
-                    ]
-                )
+                elif isinstance(event, FunctionToolCallEvent):
+                    await flush_text()
+                    tool_id_counter += 1
+                    call_id = event.part.tool_call_id or f"tool_{tool_id_counter}"
+                    await safe_append(
+                        chunks=[
+                            TaskUpdateChunk(
+                                id=call_id,
+                                title=f"Calling {event.part.tool_name}...",
+                                status="in_progress",
+                            )
+                        ]
+                    )
 
-            elif isinstance(event, FunctionToolResultEvent):
-                await flush_text()
-                result_part = event.result
-                tool_name = getattr(result_part, "tool_name", None) or "tool"
-                call_id = result_part.tool_call_id or f"tool_{tool_id_counter}"
-                outcome = getattr(result_part, "outcome", "success")
-                await safe_append(
-                    chunks=[
-                        TaskUpdateChunk(
-                            id=call_id,
-                            title=tool_name,
-                            status="error" if outcome == "failed" else "complete",
-                        )
-                    ]
-                )
-                if tool_name in _FILE_RESULT_TOOLS:
-                    await upload_tool_file(tool_name, getattr(result_part, "content", ""))
+                elif isinstance(event, FunctionToolResultEvent):
+                    await flush_text()
+                    result_part = event.result
+                    tool_name = getattr(result_part, "tool_name", None) or "tool"
+                    call_id = result_part.tool_call_id or f"tool_{tool_id_counter}"
+                    outcome = getattr(result_part, "outcome", "success")
+                    await safe_append(
+                        chunks=[
+                            TaskUpdateChunk(
+                                id=call_id,
+                                title=tool_name,
+                                status="error" if outcome == "failed" else "complete",
+                            )
+                        ]
+                    )
+                    if tool_name in _FILE_RESULT_TOOLS:
+                        await upload_tool_file(tool_name, getattr(result_part, "content", ""))
 
         await flush_text()
         if flush_task is not None and not flush_task.done():

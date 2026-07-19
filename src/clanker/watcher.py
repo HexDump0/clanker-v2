@@ -60,11 +60,21 @@ class WatcherState:
         tmp.replace(path)
 
 
+# Even when nothing seems to have changed, re-walk the whole queue every N polls
+# in case a change slipped past the cheap fingerprint (e.g. one cert added and
+# another claimed within the same interval, leaving the total unchanged).
+FULL_SWEEP_EVERY = 20
+
+
 class Watcher:
     """Polls PENDING certifications and hands new ones to a handler.
 
     ``emit_backlog`` controls the very first run (no state file): False records
     the existing queue without emitting; True treats the whole backlog as new.
+
+    Most polls cost a single request: page 1 carries the queue total, and the
+    full multi-page walk only happens when the (total, page-1 ids) fingerprint
+    changes — or every ``FULL_SWEEP_EVERY`` polls as a safety net.
     """
 
     def __init__(
@@ -82,17 +92,33 @@ class Watcher:
         loaded = WatcherState.load(state_file)
         self._first_run = loaded is None
         self._state = loaded or WatcherState()
+        self._last_fingerprint: tuple[int, frozenset[str]] | None = None
+        self._polls_since_walk = 0
 
     async def poll_once(self) -> list[CertSummary]:
-        """Fetch the full pending queue and return certs not seen before.
+        """Check the pending queue and return certs not seen before.
 
         Seen-state is updated and persisted; deciding what to do with the new
         certs is the caller's job.
         """
-        pending = [
-            cert
-            async for cert in self._client.iter_certifications(status=CertStatus.PENDING)
-        ]
+        first_page = await self._client.list_certifications(status=CertStatus.PENDING, page=1)
+        fingerprint = (first_page.total, frozenset(c.id for c in first_page.certs))
+
+        unchanged = fingerprint == self._last_fingerprint
+        if unchanged and not self._first_run and self._polls_since_walk < FULL_SWEEP_EVERY:
+            self._polls_since_walk += 1
+            return []
+
+        pending = list(first_page.certs)
+        for page in range(2, first_page.pages + 1):
+            result = await self._client.list_certifications(
+                status=CertStatus.PENDING, page=page
+            )
+            if not result.certs:
+                break
+            pending.extend(result.certs)
+        self._last_fingerprint = fingerprint
+        self._polls_since_walk = 0
 
         fresh = [c for c in pending if c.id not in self._state.seen_ids]
         self._state.seen_ids.update(c.id for c in pending)
