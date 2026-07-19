@@ -7,6 +7,7 @@ scraping (the verdict is the agent's validated output).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,6 +19,9 @@ from clanker.review.models import ReviewOutput
 from clanker.review.packet import ReviewPacket, build_packet
 from clanker.review.pdf import PdfError, generate_review_pdf
 from clanker.review.tools import ReviewTools
+from clanker.review.video.director import Director
+from clanker.review.video.models import VideoProject
+from clanker.review.video.pipeline import generate_review_video
 from clanker.shipwrights import ShipwrightsClient
 
 logger = logging.getLogger(__name__)
@@ -31,6 +35,8 @@ class ReviewOutcome:
     pdf_path: Path | None
     input_tokens: int
     output_tokens: int
+    video_path: Path | None = None
+    video_error: str | None = None
 
 
 class ReviewRunner:
@@ -41,11 +47,13 @@ class ReviewRunner:
         client: ShipwrightsClient,
         settings: Settings,
         tools: ReviewTools | None = None,
+        video_director: Director | None = None,
     ) -> None:
         self._agent = agent
         self._client = client
         self._settings = settings
         self._tools = tools
+        self._video_director = video_director
 
     async def review_cert(self, cert_id: str) -> ReviewOutcome:
         """Run the full pipeline for one cert. Raises on unrecoverable errors."""
@@ -79,6 +87,44 @@ class ReviewRunner:
             # The verdict is still valid without the report.
             logger.exception("PDF generation failed for cert %s", cert_id)
 
+        video_path: Path | None = None
+        video_error: str | None = None
+        if (
+            self._settings.video_enabled
+            and self._video_director is not None
+            and review.video_evidence
+        ):
+            try:
+                generated = await asyncio.wait_for(
+                    generate_review_video(
+                        project=VideoProject(
+                            project_name=packet.cert.project_name,
+                            project_author=(
+                                packet.cert.submitter_username
+                                or packet.cert.submitter_name
+                                or ""
+                            ),
+                            verdict=review.verdict.value,
+                            required_fixes=review.required_fixes or [],
+                        ),
+                        evidence=review.video_evidence,
+                        director=self._video_director,
+                        work_dir=self._settings.video_work_dir / cert_id,
+                        output_path=self._settings.video_dir / f"{cert_id}.mp4",
+                    ),
+                    timeout=self._settings.video_timeout,
+                )
+                video_path = generated.video.path
+            except TimeoutError:
+                video_error = (
+                    f"video generation exceeded the {self._settings.video_timeout:g}s timeout"
+                )
+                logger.exception("Video generation timed out for cert %s", cert_id)
+            except Exception as exc:
+                # A failed optional artifact never invalidates the review or PDF.
+                video_error = str(exc)
+                logger.exception("Video generation failed for cert %s", cert_id)
+
         return ReviewOutcome(
             cert_id=cert_id,
             packet=packet,
@@ -86,4 +132,6 @@ class ReviewRunner:
             pdf_path=pdf_path,
             input_tokens=usage.input_tokens,
             output_tokens=usage.output_tokens,
+            video_path=video_path,
+            video_error=video_error,
         )

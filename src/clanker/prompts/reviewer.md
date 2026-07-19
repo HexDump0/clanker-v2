@@ -38,3 +38,15 @@ No further analysis needed.
   "AI UNDISCLOSED", "RESUBMISSION SPAM".
 - Do not invent checks beyond the rubric. This stage is synthesis and decision,
   not re-investigation.
+
+## Browser-visible video evidence
+
+For a REJECT or FLAG_FOR_HUMAN result, include up to five `video_evidence` items for
+material findings that can be shown on a public web page. Each item contains a stable
+short id, the check/category, the exact page URL, the factual finding, and the one-based
+`required_fixes` indexes it supports.
+
+Only include evidence you actually observed while reviewing. Do not choose highlight
+text, CSS selectors, coordinates, screenshots, camera treatment, or narration. A
+separate vision director handles presentation. Omit evidence that cannot be shown on a
+public HTTP(S) page. For APPROVE, `video_evidence` may be empty.

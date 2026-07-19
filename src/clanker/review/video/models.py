@@ -1,25 +1,133 @@
-"""The contract between the video director (pass 1) and the recorder (pass 2).
+"""Validated contracts for screenshot-first review videos.
 
-A ``VideoScript`` is the director's validated output: an ordered list of fully
-resolved scenes. The recorder replays it deterministically — it never decides
-where to go or what to say, so a bad page at replay time skips one scene
-instead of invalidating the video.
+The review agent supplies semantic evidence. A separate vision model selects scenes
+and optionally names exact visible text. Application code alone resolves rectangles
+and renders the video. Keeping those boundaries explicit makes weak director output
+safe: an unusable highlight becomes an ordinary bottom-right callout scene.
 """
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field, model_validator
+from datetime import datetime
+from enum import StrEnum
+from pathlib import Path
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
-class SceneTarget(BaseModel):
-    """What to spotlight on the page. Exactly one of the three forms.
+class Box(BaseModel):
+    x: float = Field(ge=0)
+    y: float = Field(ge=0)
+    width: float = Field(gt=0)
+    height: float = Field(gt=0)
 
-    - ``text``: first element whose visible text contains this snippet
-      (robust on pages we don't control — anchor on what the director saw);
-    - ``selector``: CSS selector, for well-known stable structures;
-    - ``viewport``: frame the whole visible page (broken/blank pages, 404s).
+    @property
+    def area(self) -> float:
+        return self.width * self.height
+
+
+class VisibleElement(BaseModel):
+    """Visible DOM text and bounds captured in the same state as the screenshot."""
+
+    text: str
+    box: Box
+    tag: str = ""
+
+
+class EvidenceCapture(BaseModel):
+    evidence_id: str
+    requested_url: str
+    final_url: str
+    http_status: int | None = None
+    page_title: str = ""
+    captured_at: datetime
+    screenshot_path: Path
+    viewport_width: int = Field(gt=0)
+    viewport_height: int = Field(gt=0)
+    elements: list[VisibleElement] = Field(default_factory=list)
+
+
+class SceneRole(StrEnum):
+    PRIMARY = "primary"
+    CORROBORATING = "corroborating"
+
+
+class DirectedScene(BaseModel):
+    """One editorial decision from the vision director.
+
+    There are deliberately no URLs, selectors, rectangles, timing, or styling fields.
     """
 
+    model_config = ConfigDict(extra="forbid")
+
+    evidence_id: str
+    role: SceneRole
+    title: str = Field(min_length=1, max_length=80)
+    explanation: str = Field(min_length=1, max_length=260)
+    highlight_text: str | None = Field(
+        default=None,
+        max_length=240,
+        description=(
+            "Exact text visibly present in the screenshot, or null when no useful target exists."
+        ),
+    )
+    fix_ids: list[int] = Field(default_factory=list, max_length=4)
+
+    @field_validator("highlight_text")
+    @classmethod
+    def _blank_highlight_is_none(cls, value: str | None) -> str | None:
+        value = value.strip() if value else None
+        return value or None
+
+
+class VideoPlan(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    headline: str = Field(min_length=1, max_length=100)
+    summary: str = Field(min_length=1, max_length=240)
+    scenes: list[DirectedScene] = Field(min_length=1, max_length=3)
+
+    @model_validator(mode="after")
+    def _unique_evidence(self) -> VideoPlan:
+        ids = [scene.evidence_id for scene in self.scenes]
+        if len(ids) != len(set(ids)):
+            raise ValueError("each evidence item may appear in at most one scene")
+        return self
+
+
+class HighlightResolution(StrEnum):
+    RESOLVED = "resolved"
+    NOT_REQUESTED = "not_requested"
+    MISSING = "missing"
+    AMBIGUOUS = "ambiguous"
+    UNSAFE = "unsafe"
+
+
+class ComposedScene(BaseModel):
+    directed: DirectedScene
+    capture: EvidenceCapture
+    target_box: Box | None = None
+    resolution: HighlightResolution
+    resolution_detail: str = ""
+
+
+class VideoProject(BaseModel):
+    project_name: str
+    project_author: str = ""
+    verdict: str
+    required_fixes: list[str] = Field(default_factory=list)
+
+
+class VideoRunManifest(BaseModel):
+    project: VideoProject
+    plan: VideoPlan
+    scenes: list[ComposedScene]
+    output_path: Path
+
+
+# Legacy live-page recorder contract. Kept for callers of record_video_script while
+# the screenshot-first pipeline replaces it in orchestration.
+class SceneTarget(BaseModel):
     text: str | None = None
     selector: str | None = None
     viewport: bool = False
@@ -32,21 +140,16 @@ class SceneTarget(BaseModel):
 
 
 class Scene(BaseModel):
-    """One finding, demonstrated in place: open ``url``, spotlight ``target``,
-    show a callout explaining the problem and the fix."""
-
     url: str
     target: SceneTarget
-    title: str = Field(description="Short problem statement shown as the callout heading.")
-    body: str = Field(description="What is wrong and how to fix it, 1-3 sentences.")
+    title: str
+    body: str
     hold_seconds: float = Field(default=5.0, ge=1.0, le=15.0)
 
 
 class VideoScript(BaseModel):
-    """Everything the recorder needs to produce one review video."""
-
     project_name: str
     verdict: str
-    summary: str = Field(default="", description="One-line intro shown on the title card.")
+    summary: str = ""
     scenes: list[Scene] = Field(min_length=1)
     required_fixes: list[str] = Field(default_factory=list)

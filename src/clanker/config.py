@@ -85,6 +85,38 @@ class Settings(BaseSettings):
         default="qwen/qwen3-vl-8b-thinking",
         description="Vision model that describes rendered page screenshots.",
     )
+    video_director_model_name: str = Field(
+        default="qwen/qwen3-vl-8b-thinking",
+        description=(
+            "Separate vision model used once to select and write review-video scenes."
+        ),
+    )
+    video_director_provider_only: str = Field(
+        default="",
+        description=(
+            "Comma-separated OpenRouter provider slugs used only for the video "
+            "director model. Empty = let OpenRouter route the director freely; "
+            "the review agent's OPENROUTER_PROVIDER_ONLY setting is not inherited."
+        ),
+    )
+    video_director_allow_fallbacks: bool = Field(
+        default=False,
+        description=(
+            "With a video-director provider pin, whether OpenRouter may fall back "
+            "to other providers."
+        ),
+    )
+    video_enabled: bool = Field(
+        default=True,
+        description="Generate a review video when the review supplies browser evidence.",
+    )
+    video_dir: Path = Path("data/videos")
+    video_work_dir: Path = Path("data/video-runs")
+    video_timeout: float = Field(
+        default=240.0,
+        ge=30.0,
+        description="Hard timeout for the complete optional video artifact stage.",
+    )
     render_timeout: float = Field(
         default=20.0, ge=5.0, description="Page-load timeout (seconds) for browser renders."
     )
@@ -134,6 +166,14 @@ class Settings(BaseSettings):
     @property
     def provider_pins(self) -> list[str]:
         return [p.strip() for p in self.openrouter_provider_only.split(",") if p.strip()]
+
+    @property
+    def video_director_provider_pins(self) -> list[str]:
+        return [
+            provider.strip()
+            for provider in self.video_director_provider_only.split(",")
+            if provider.strip()
+        ]
 
 
 def load_settings() -> Settings:

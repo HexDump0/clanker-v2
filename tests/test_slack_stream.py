@@ -85,6 +85,46 @@ async def test_tool_result_completes_and_uploads_review_pdf(tmp_path):
     streamer.stop.assert_awaited_once()
 
 
+async def test_tool_result_uploads_review_pdf_and_video(tmp_path):
+    pdf = tmp_path / "review.pdf"
+    video = tmp_path / "review.mp4"
+    pdf.write_bytes(b"%PDF-fake")
+    video.write_bytes(b"mp4")
+    event = FunctionToolResultEvent(
+        part=ToolReturnPart(
+            tool_name="run_review",
+            content=json.dumps(
+                {"ok": True, "pdf_path": str(pdf), "video_path": str(video)}
+            ),
+            tool_call_id="call_review",
+        )
+    )
+    streamer = SimpleNamespace(append=AsyncMock(), stop=AsyncMock())
+    client = SimpleNamespace(
+        chat_stream=AsyncMock(return_value=streamer),
+        files_upload_v2=AsyncMock(),
+    )
+
+    await run_agent_streaming(
+        agent=FakeAgent([event]),
+        user_content="review c1",
+        message_history=[],
+        client=client,
+        channel_id="C123",
+        thread_ts="111.222",
+        team_id="T123",
+        user_id="U123",
+        store=AsyncMock(),
+        thread_key=("T123", "C123", "111.222"),
+    )
+
+    assert client.files_upload_v2.await_count == 2
+    assert [call.kwargs["filename"] for call in client.files_upload_v2.call_args_list] == [
+        "review_report.pdf",
+        "review_walkthrough.mp4",
+    ]
+
+
 async def test_unsuccessful_tool_result_is_error_and_does_not_upload(tmp_path):
     pdf = tmp_path / "review.pdf"
     pdf.write_bytes(b"%PDF-fake")

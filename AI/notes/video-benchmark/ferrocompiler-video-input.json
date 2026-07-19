@@ -1,0 +1,27 @@
+{
+  "project": {
+    "project_name": "ferrocompiler",
+    "project_author": "@idident",
+    "verdict": "REJECT",
+    "required_fixes": [
+      "Ensure the GitHub repository exists and is public.",
+      "Verify the submitted URL matches the actual repository."
+    ]
+  },
+  "evidence": [
+    {
+      "id": "submitted-repository-404",
+      "check": "repo_link_valid",
+      "url": "https://github.com/idident/ferrocompiler",
+      "finding": "The submitted repository URL opens GitHub's not-found page, so its code and history cannot be reviewed.",
+      "fix_ids": [1, 2]
+    },
+    {
+      "id": "github-search-zero-results",
+      "check": "repo_link_valid",
+      "url": "https://github.com/search?q=ferrocompiler&type=repositories",
+      "finding": "A public GitHub repository search for the project name returns no matching repositories.",
+      "fix_ids": [1, 2]
+    }
+  ]
+}

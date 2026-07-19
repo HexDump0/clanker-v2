@@ -84,6 +84,12 @@ async def cmd_review(settings: Settings, args: argparse.Namespace) -> None:
     for row in review.checks.as_pdf_rows():
         print(f"  [{row['status']:>4}] {row['name']}: {row['details']}")
     print(f"\nPDF: {outcome.pdf_path or '(generation failed)'}")
+    if outcome.video_path:
+        print(f"Video: {outcome.video_path}")
+    elif outcome.video_error:
+        print(f"Video: generation failed ({outcome.video_error})")
+    else:
+        print("Video: not requested (no browser-visible evidence)")
     print(f"Tokens: {outcome.input_tokens} in / {outcome.output_tokens} out")
 
 

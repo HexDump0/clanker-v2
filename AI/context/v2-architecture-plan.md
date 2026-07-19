@@ -33,19 +33,31 @@ Given a submission packet, the review agent:
 It owns review judgment. It does not publish to Slack, generate artifacts, manage jobs,
 spawn other agents, or mutate Shipwrights.
 
-### Video planner — narrowly agentic
+### Video director — one-shot vision model
 
-The video planner consumes the completed `ReviewResult`. It may choose which material
-issues to demonstrate, arrange scenes, select supporting pages, and write concise
-callouts. It returns a validated `VideoPlan` and cannot change the verdict or invent
-findings unsupported by the review evidence.
+The video director is a separate vision-capable model from the review agent. Application
+code first captures one clean screenshot for each material review evidence item. In one
+multimodal completion, the director sees those screenshots plus the supported findings
+and fixes, chooses one to three non-redundant scenes, marks evidence as primary or
+corroborating, writes concise callouts, and returns the exact visible text it wants
+highlighted when a useful target exists.
 
-### Browser recovery — optional, constrained agentic behavior
+Its OpenRouter provider routing is configured independently from the review agent. A
+review-model provider pin must never be inherited by a director model that may only be
+served by a different provider.
 
-The normal browser executor follows `VideoPlan` deterministically. Later, if an expected
-target cannot be located, a small recovery agent may inspect the current page and suggest
-a replacement locator or navigation step. Its authority is limited to finding evidence
-already named in the plan. Add this only after deterministic recording is reliable.
+It returns a validated `VideoPlan`. It has no browser tools, cannot create URLs, cannot
+change the verdict or fixes, and cannot invent findings unsupported by `ReviewResult`.
+It controls editorial selection and wording, not navigation, selectors, coordinates,
+layout, styling, animation, recording, or encoding.
+
+### No agentic browser recovery
+
+Application code matches the director's requested text against the visible DOM snapshot
+captured with the screenshot. It highlights only a unique safe match. If the director
+returns no text, or the text is missing or ambiguous, the scene still renders with its
+finding card at the bottom-right and no highlight. The initial design has no locator-
+recovery agent or browser tool loop.
 
 ### Slack conversation assistant — optional and agentic
 
@@ -86,7 +98,13 @@ Shipwrights watcher or explicit Slack command
              +------+------+
              |             |
              v             v
-       Render PDF     Plan and record video
+       Render PDF     Capture evidence screenshots
+             |             |
+             |       Run vision director once
+             |             |
+             |       Resolve highlight text
+             |             |
+             |       Compose and encode video
              |             |
              +------+------+
                     |
@@ -128,10 +146,11 @@ Every failed or warned check should carry evidence usable by humans and artifact
 
 - evidence type (`readme`, `github_file`, `commit`, `release`, `demo_page`, etc.);
 - canonical URL;
-- path, line range, text excerpt, or page description when available;
-- optional browser targeting hint;
+- path, line range, text excerpt, or page description when actually observed;
+- HTTP status or visible text actually observed during the review, when available;
 - explanation and concrete suggested fix.
 
+The review agent supplies semantic evidence and its URL, not a required video locator.
 PDF and video workers must not reconstruct or reinterpret the verdict.
 
 ### Artifact
@@ -139,11 +158,19 @@ PDF and video workers must not reconstruct or reinterpret the verdict.
 Tracks type, state, attempts, timestamps, error, storage location, hash, size, and Slack
 publication state. PDF and video artifacts succeed or fail independently.
 
+### EvidenceScreenshot
+
+Produced deterministically before direction. It binds one review evidence ID to the
+requested/final URL, HTTP status, capture timestamp, clean screenshot, and a snapshot of
+visible DOM text with element rectangles. The final video always uses this stored clean
+screenshot rather than replaying the live page.
+
 ### VideoPlan
 
-A validated list of scenes derived from `ReviewResult`. Each scene names its source
-check/evidence, target URL, expected page type, navigation/locator hints, callout text,
-suggested fix, and desired duration.
+A validated list of scenes returned by the vision director. Each scene references an
+existing evidence ID and fix IDs, identifies primary or corroborating evidence, supplies
+short title/body copy, and optionally requests an exact visible text string to highlight.
+It contains no model-generated URL, CSS selector, coordinates, or visual styling.
 
 ## Durable state and failure semantics
 
@@ -197,15 +224,21 @@ Follow-up questions may use the optional assistant with persisted `ReviewResult`
 
 ## Video delivery
 
-### README MVP
+### Screenshot-first MVP
 
-- Generate video for a rejected/warned README check on a public GitHub page.
-- Use fixed viewport/theme and deterministic navigation from evidence.
-- Highlight the relevant area and overlay the finding and suggested fix.
-- Record a short WebM/MP4, close the browser cleanly, and validate existence, duration,
-  and Slack size before publishing.
+- Generate videos for rejections and meaningful warnings backed by public-page evidence.
+- Capture one clean fixed-viewport screenshot and visible-text/rectangle snapshot per
+  material evidence item before calling the director.
+- Give a separate vision model the screenshots and supported review facts in one call.
+- Resolve returned highlight text programmatically: normalized exact match first, then a
+  unique containing element; ambiguous or missing matches get no highlight.
+- Compose from stored screenshots in the fixed minimalist template. A no-highlight scene
+  places the finding card at the bottom-right over the undimmed screenshot.
+- Encode a short MP4 and validate existence, codec, resolution, duration, non-black key
+  frames, and Slack size before publishing.
 
-Use Playwright recording/screencast and locator highlighting or controlled overlays.
+Use Playwright for isolated capture, a controlled local composition for presentation,
+and ffmpeg/ffprobe for encoding and validation.
 
 ### Expansion order
 

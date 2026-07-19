@@ -23,7 +23,12 @@ def make_announcer() -> tuple[Announcer, AsyncMock]:
     return announcer, slack
 
 
-def outcome_for(cert: CertSummary, pdf: Path | None = None, **review_overrides) -> ReviewOutcome:
+def outcome_for(
+    cert: CertSummary,
+    pdf: Path | None = None,
+    video: Path | None = None,
+    **review_overrides,
+) -> ReviewOutcome:
     return ReviewOutcome(
         cert_id=cert.id,
         packet=None,  # not used by the announcer
@@ -31,6 +36,7 @@ def outcome_for(cert: CertSummary, pdf: Path | None = None, **review_overrides) 
         pdf_path=pdf,
         input_tokens=100,
         output_tokens=50,
+        video_path=video,
     )
 
 
@@ -70,3 +76,19 @@ async def test_post_outcome_without_pdf_posts_note():
     slack.files_upload_v2.assert_not_awaited()
     note = slack.chat_postMessage.call_args.kwargs["text"]
     assert "PDF report failed" in note
+
+
+async def test_post_outcome_uploads_pdf_and_video(tmp_path):
+    pdf = tmp_path / "r.pdf"
+    video = tmp_path / "r.mp4"
+    pdf.write_bytes(b"%PDF-fake")
+    video.write_bytes(b"mp4")
+    announcer, slack = make_announcer()
+    cert = CertSummary.model_validate(make_cert("c1"))
+
+    await announcer.post_outcome(cert, outcome_for(cert, pdf=pdf, video=video), "111.222")
+
+    assert slack.files_upload_v2.await_count == 2
+    uploads = slack.files_upload_v2.call_args_list
+    assert uploads[0].kwargs["filename"] == "review_report.pdf"
+    assert uploads[1].kwargs["filename"] == "review_walkthrough.mp4"

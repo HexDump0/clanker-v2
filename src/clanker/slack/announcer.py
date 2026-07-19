@@ -72,7 +72,7 @@ class Announcer:
         return ts
 
     async def post_outcome(self, cert: CertSummary, outcome: ReviewOutcome, parent_ts: str) -> None:
-        """Edit the parent with the verdict and upload the PDF to the thread."""
+        """Edit the parent and upload every available review artifact."""
         review = outcome.review
         emoji = VERDICT_EMOJI.get(review.verdict, ":grey_question:")
         text = self.ship_text(cert) + f"\n\n{emoji} *{review.verdict.value}*"
@@ -98,6 +98,21 @@ class Announcer:
                 channel=self._channel,
                 thread_ts=parent_ts,
                 text="Review finished but the PDF report failed to generate.",
+            )
+
+        if outcome.video_path:
+            await self._slack.files_upload_v2(
+                channel=self._channel,
+                thread_ts=parent_ts,
+                file=str(outcome.video_path),
+                filename="review_walkthrough.mp4",
+                initial_comment=":movie_camera: Visual evidence walkthrough",
+            )
+        elif outcome.video_error:
+            await self._slack.chat_postMessage(
+                channel=self._channel,
+                thread_ts=parent_ts,
+                text="Review video generation failed; the verdict and PDF are unaffected.",
             )
 
     async def post_failure(self, parent_ts: str) -> None:

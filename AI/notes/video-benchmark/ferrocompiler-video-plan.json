@@ -1,0 +1,22 @@
+{
+  "headline": "The submitted repository cannot be reviewed.",
+  "summary": "The repository URL is unavailable, and a public search finds no matching project.",
+  "scenes": [
+    {
+      "evidence_id": "submitted-repository-404",
+      "role": "primary",
+      "title": "The repository URL opens a 404 page",
+      "explanation": "Clanker cannot inspect the code, commits, releases, or README at the submitted URL.",
+      "highlight_text": "This is not the web page you are looking for",
+      "fix_ids": [1, 2]
+    },
+    {
+      "evidence_id": "github-search-zero-results",
+      "role": "corroborating",
+      "title": "No public repository matches the project name",
+      "explanation": "The search result supports the accessibility finding; it is not a separate rejection reason.",
+      "highlight_text": "Your search did not match any repositories",
+      "fix_ids": [1, 2]
+    }
+  ]
+}

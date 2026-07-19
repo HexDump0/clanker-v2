@@ -30,8 +30,13 @@ logger = logging.getLogger(__name__)
 
 FLUSH_INTERVAL = 0.4  # seconds between Slack flushes
 
-# Tools whose JSON result carries a file to drop into the thread.
-_FILE_RESULT_TOOLS = {"run_review": ("pdf_path", "review_report.pdf")}
+# Tools whose JSON result carries files to drop into the thread.
+_FILE_RESULT_TOOLS = {
+    "run_review": (
+        ("pdf_path", "review_report.pdf"),
+        ("video_path", "review_walkthrough.mp4"),
+    )
+}
 
 
 async def run_agent_streaming(
@@ -112,18 +117,18 @@ async def run_agent_streaming(
             await flush_text()
 
     async def upload_tool_file(tool_name: str, content: object) -> None:
-        path_key, filename = _FILE_RESULT_TOOLS[tool_name]
         try:
             parsed = json.loads(content) if isinstance(content, str) else {}
-            file_path = parsed.get(path_key) or ""
-            if file_path and os.path.isfile(file_path):
-                await client.files_upload_v2(
-                    channel=channel_id,
-                    thread_ts=thread_ts,
-                    file=file_path,
-                    filename=filename,
-                    initial_comment="",
-                )
+            for path_key, filename in _FILE_RESULT_TOOLS[tool_name]:
+                file_path = parsed.get(path_key) or ""
+                if file_path and os.path.isfile(file_path):
+                    await client.files_upload_v2(
+                        channel=channel_id,
+                        thread_ts=thread_ts,
+                        file=file_path,
+                        filename=filename,
+                        initial_comment="",
+                    )
         except Exception:
             logger.exception("Failed to upload %s result file to Slack", tool_name)
 

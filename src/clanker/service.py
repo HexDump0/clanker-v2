@@ -19,6 +19,7 @@ from clanker.config import Settings, configure_observability
 from clanker.review import ReviewRunner
 from clanker.review.agent import create_chat_agent, create_review_agent
 from clanker.review.tools import ReviewTools
+from clanker.review.video.director import VisionDirector
 from clanker.review.vision import PageRenderer
 from clanker.shipwrights import CertSummary, ShipwrightsClient
 from clanker.slack.announcer import Announcer
@@ -51,7 +52,14 @@ def build_app(settings: Settings, *, with_slack: bool = True) -> AppContext:
         hackclub_ai_key=settings.hackclub_api_key,
     )
     review_agent = create_review_agent(settings, tools)
-    runner = ReviewRunner(agent=review_agent, client=client, settings=settings, tools=tools)
+    video_director = VisionDirector(settings) if settings.video_enabled else None
+    runner = ReviewRunner(
+        agent=review_agent,
+        client=client,
+        settings=settings,
+        tools=tools,
+        video_director=video_director,
+    )
 
     slack: AsyncWebClient | None = None
     announcer: Announcer | None = None
@@ -144,6 +152,8 @@ async def run_slack_service(ctx: AppContext) -> None:
                 "required_fixes": outcome.review.required_fixes,
                 "special_flags": outcome.review.special_flags,
                 "pdf_path": str(outcome.pdf_path) if outcome.pdf_path else None,
+                "video_path": str(outcome.video_path) if outcome.video_path else None,
+                "video_error": outcome.video_error,
             }
         )
 

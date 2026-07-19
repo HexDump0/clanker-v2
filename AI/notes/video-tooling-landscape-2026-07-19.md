@@ -102,8 +102,6 @@ asset handling, and vendor dependency.
 3. Safely navigate arbitrary public evidence URLs.
 4. Resolve and verify the target, with deterministic fallbacks.
 5. Capture screenshot, target rectangle, URL, status, and timestamp together.
-6. Reject stale evidence when the current page contradicts the completed review.
-7. Publish the artifact with Clanker's existing job/failure-isolation semantics.
+6. Publish the artifact with Clanker's existing job/failure-isolation semantics.
 
 That custom evidence layer—not drawing frames—is the actual product-specific work.
-

@@ -10,7 +10,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class CheckStatus(StrEnum):
@@ -24,6 +24,46 @@ class ReviewVerdict(StrEnum):
     APPROVE = "APPROVE"
     REJECT = "REJECT"
     FLAG_FOR_HUMAN = "FLAG_FOR_HUMAN"
+
+
+class VideoEvidence(BaseModel):
+    """A browser-visible finding that may become a video scene.
+
+    The review agent owns the finding and URL. It deliberately does not choose a
+    selector, text anchor, rectangle, or screenshot treatment; those belong to
+    the separate video pipeline.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(pattern=r"^[a-z0-9][a-z0-9_-]{0,47}$")
+    check: str = Field(description="Rubric check or short evidence category.")
+    url: str = Field(description="Public HTTP(S) page on which the finding can be shown.")
+    finding: str = Field(
+        min_length=1,
+        max_length=500,
+        description="Factual finding already established by the review.",
+    )
+    fix_ids: list[int] = Field(
+        default_factory=list,
+        description="One-based indexes into required_fixes that this evidence supports.",
+    )
+
+    @field_validator("url")
+    @classmethod
+    def _http_url(cls, value: str) -> str:
+        if not value.startswith(("http://", "https://")):
+            raise ValueError("video evidence URL must use HTTP(S)")
+        return value
+
+    @field_validator("fix_ids")
+    @classmethod
+    def _positive_unique_fix_ids(cls, value: list[int]) -> list[int]:
+        if any(item < 1 for item in value):
+            raise ValueError("fix_ids are one-based and must be positive")
+        if len(value) != len(set(value)):
+            raise ValueError("fix_ids must be unique")
+        return value
 
 
 class CheckResult(BaseModel):
@@ -117,3 +157,21 @@ class ReviewOutput(BaseModel):
             '"RESUBMISSION SPAM".'
         ),
     )
+    video_evidence: list[VideoEvidence] = Field(
+        default_factory=list,
+        max_length=5,
+        description=(
+            "Material browser-visible evidence for an optional review video. Supply URLs and "
+            "findings only; never selectors, highlight text, or coordinates."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _validate_video_evidence(self) -> ReviewOutput:
+        ids = [item.id for item in self.video_evidence]
+        if len(ids) != len(set(ids)):
+            raise ValueError("video_evidence ids must be unique")
+        fix_count = len(self.required_fixes or [])
+        if any(fix_id > fix_count for item in self.video_evidence for fix_id in item.fix_ids):
+            raise ValueError("video evidence references a missing required fix")
+        return self

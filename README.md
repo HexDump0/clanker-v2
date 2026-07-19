@@ -19,6 +19,8 @@ src/clanker/
 │   ├── models.py    ReviewOutput — the 13-check rubric as a validated schema
 │   ├── tools.py     11 investigation tools (GitHub, URL checks, page fetch)
 │   ├── pdf.py       async Typst compile of the report
+│   ├── video/       screenshot capture → vision direction → target resolution
+│   │                → minimal MP4 composition, with JSON audit manifest
 │   └── runner.py    packet → agent → ReviewOutput → PDF
 ├── slack/           announcements, verdict updates, PDF upload, @mention chat
 │                    bot (Socket Mode, streaming)
@@ -67,6 +69,20 @@ uv run clanker run                   # everything: watcher + reviews + Slack
 
 Docker: `docker build -t clanker .` — runs `clanker run`; mount a volume at
 `/app/data` so watcher state and PDFs persist.
+
+The screenshot-first review-video pipeline accepts review-owned evidence URLs and
+findings. It makes one call to `VIDEO_DIRECTOR_MODEL_NAME`, then resolves the model's
+optional exact text against the captured DOM. Missing or ambiguous text produces a
+bottom-right callout with no highlight. Rendering requires `ffmpeg` and `ffprobe`.
+
+The checked-in ferrocompiler benchmark can be rendered without a model call:
+
+```sh
+uv run python scripts/render_review_video.py \
+  AI/notes/video-benchmark/ferrocompiler-video-input.json \
+  --director-plan AI/notes/video-benchmark/ferrocompiler-video-plan.json \
+  --output data/videos/ferrocompiler-screenshot-pipeline.mp4
+```
 
 ## Development
 
