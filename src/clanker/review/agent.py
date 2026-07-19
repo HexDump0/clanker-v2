@@ -14,12 +14,11 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-from openai import AsyncOpenAI
 from pydantic_ai import Agent, PromptedOutput
-from pydantic_ai.models.openrouter import OpenRouterModel, OpenRouterModelSettings
-from pydantic_ai.providers.openrouter import OpenRouterProvider
+from pydantic_ai.models.openrouter import OpenRouterModelSettings
 
-from clanker.config import HACKCLUB_AI_BASE_URL, Settings
+from clanker.config import Settings
+from clanker.llm import build_model
 from clanker.review.models import ReviewOutput
 from clanker.review.tools import ReviewTools
 
@@ -40,16 +39,6 @@ def build_review_instructions() -> str:
             "# Demo Guidelines Reference\n\n" + _prompt("demo_guidelines.md"),
         ]
     )
-
-
-def build_model(settings: Settings) -> OpenRouterModel:
-    """The LLM, via OpenRouter directly or the Hack Club AI proxy."""
-    if settings.ai_provider == "hackclub":
-        client = AsyncOpenAI(base_url=HACKCLUB_AI_BASE_URL, api_key=settings.require_ai_key())
-        provider = OpenRouterProvider(openai_client=client)
-    else:
-        provider = OpenRouterProvider(api_key=settings.require_ai_key())
-    return OpenRouterModel(settings.model_name, provider=provider)
 
 
 def build_model_settings(settings: Settings) -> OpenRouterModelSettings:

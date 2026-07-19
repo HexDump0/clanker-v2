@@ -36,6 +36,7 @@ class ReviewPacket:
     tree: dict[str, Any] | None = None
     languages: dict[str, Any] | None = None
     stardance: dict[str, Any] | None = None
+    demo_render: dict[str, Any] | None = None
 
     @property
     def stardance_url(self) -> str | None:
@@ -115,6 +116,29 @@ class ReviewPacket:
                 # itself a review signal (removed project / expired login).
                 lines.append(f"- fetch failed: {self.stardance.get('error') or 'unknown error'}")
 
+        if self.demo_render:
+            r = self.demo_render
+            final = r.get("final_url") or "?"
+            lines += [
+                "",
+                "## Demo page render (pre-fetched, JavaScript executed — do not re-render)",
+                f"- Final URL: {final} (HTTP {r.get('status_code') or '?'})",
+            ]
+            if r.get("viewport_mostly_empty"):
+                lines.append(
+                    "- Viewport was mostly empty after load (almost no visible text rendered)"
+                )
+            if description := r.get("screenshot_description"):
+                lines += [
+                    "",
+                    "What a vision model sees in the screenshot "
+                    "(description only — judge it yourself):",
+                    "",
+                    description,
+                ]
+            if text := r.get("rendered_text"):
+                lines += ["", "Rendered visible text:", "", "```", text, "```"]
+
         lines += ["", "## README (cached by dashboard)"]
         if self.readme:
             readme = self.readme
@@ -169,6 +193,14 @@ async def build_packet(
         payload = await _tool_payload(tools.review_get_github_languages(cert.repo_url))
         return payload if payload and payload.get("ok") else None
 
+    async def get_demo_render() -> dict[str, Any] | None:
+        if not (tools and cert.demo_url):
+            return None
+        # A failed render (no browser, timeout) isn't evidence either way — the
+        # agent still has render/fetch tools; only ship useful payloads.
+        payload = await _tool_payload(tools.review_render_page(cert.demo_url))
+        return payload if payload and payload.get("ok") else None
+
     async def get_stardance() -> dict[str, Any] | None:
         if not (tools and cert.external_id):
             return None
@@ -176,8 +208,9 @@ async def build_packet(
         # Keep non-ok payloads: redirected_away is a review signal, not a fetch bug.
         return await _tool_payload(tools.review_fetch_stardance_project(url))
 
-    github, readme, tree, languages, stardance = await asyncio.gather(
-        get_github(), get_readme(), get_tree(), get_languages(), get_stardance()
+    github, readme, tree, languages, stardance, demo_render = await asyncio.gather(
+        get_github(), get_readme(), get_tree(), get_languages(), get_stardance(),
+        get_demo_render(),
     )
 
     return ReviewPacket(
@@ -187,4 +220,5 @@ async def build_packet(
         tree=tree,
         languages=languages,
         stardance=stardance,
+        demo_render=demo_render,
     )

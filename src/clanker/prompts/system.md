@@ -14,6 +14,10 @@ Shipwrights Dashboard. It contains:
   hackatime projects.
 - Cached GitHub data: repo metadata and recent commits.
 - Repo structure: language byte breakdown and the full file tree (when available).
+- A demo page render (when available): the demo URL loaded in a real browser with
+  JavaScript executed — post-render visible text plus a vision model's detailed
+  description of a screenshot. The description reports what is visible; whether that
+  matches the submission is YOUR judgment to make.
 - The Stardance ship page: meta fields and devlog text (when available).
 - The project README content.
 - Prior reviews of this cert (verdict + comment history), if any.
@@ -51,7 +55,14 @@ specific files, checking the demo, verifying package/release claims.
   don't also call `review_check_url` on the same URL. Returns `blocked_by_challenge`
   instead of content when the page is a challenge interstitial. Note: this is a plain
   fetch with no JavaScript — client-only-rendered (CSR) apps may show little text even
-  when the demo works
+  when the demo works; use `review_render_page` when you need the page as a browser
+  shows it
+- `review_render_page(url)` — load a page in a headless browser (JavaScript executed)
+  and return the post-render visible text, reachability, a `viewport_mostly_empty`
+  flag, and a vision model's detailed description of a screenshot. The packet usually
+  already contains a render of the demo URL — use this for other pages (subpages,
+  links from the README) or when you doubt the pre-fetched render. Slow (~10s per
+  call); look, don't crawl
 - `review_fetch_stardance_project(project_url)` — Stardance ship/project page text.
   The packet usually already contains this page — call when it's missing there or you
   doubt the pre-fetched copy.

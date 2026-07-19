@@ -14,10 +14,13 @@ from __future__ import annotations
 import html
 import json
 import re
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
 import httpx
+
+if TYPE_CHECKING:
+    from clanker.review.vision import PageRenderer
 
 GITHUB_API = "https://api.github.com"
 STARDANCE_COOKIE_NAME = "_stardance_session_v3"
@@ -200,7 +203,14 @@ class ReviewTools:
     Register on an agent with ``tools=review_tools.all()``.
     """
 
-    def __init__(self, *, github_token: str = "", stardance_session: str = "") -> None:
+    def __init__(
+        self,
+        *,
+        github_token: str = "",
+        stardance_session: str = "",
+        renderer: PageRenderer | None = None,
+    ) -> None:
+        self._renderer = renderer
         github_headers = {"Accept": "application/vnd.github+json", "User-Agent": "clanker/0.1"}
         if github_token:
             github_headers["Authorization"] = f"Bearer {github_token}"
@@ -232,6 +242,7 @@ class ReviewTools:
             self.review_search_github_code,
             self.review_check_url,
             self.review_fetch_page_text,
+            self.review_render_page,
             self.review_fetch_stardance_project,
             self.review_check_package,
         ]
@@ -606,6 +617,29 @@ class ReviewTools:
             )
         except Exception as e:
             return _err(f"Failed to fetch page: {e}")
+
+    async def review_render_page(self, url: str) -> str:
+        """Render a page in a headless browser (JavaScript executed) and look at it.
+
+        Unlike review_fetch_page_text this runs the page's JavaScript, so
+        client-side-rendered (CSR) apps show their real content. Returns the
+        post-render visible text, reachability (final URL, status code), a
+        `viewport_mostly_empty` flag, and `screenshot_description` — a detailed
+        description of a screenshot written by a vision model. The description
+        reports what is visible; judging whether that matches the submission is
+        your job.
+
+        The packet usually already contains a pre-fetched render of the demo
+        URL — call this for other pages (subpages, links found in the README)
+        or when you doubt the pre-fetched copy. Renders are slow (~10s); don't
+        crawl a site with repeated calls.
+        """
+        if not self._renderer:
+            return _err("Browser rendering is not available in this deployment")
+        try:
+            return await self._renderer.render_json(url)
+        except Exception as e:
+            return _err(f"Render failed: {e}")
 
     async def review_fetch_stardance_project(self, project_url: str) -> str:
         """Fetch a Stardance project/ship page: structured meta + visible text.

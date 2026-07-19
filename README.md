@@ -41,6 +41,7 @@ human-approved flow).
 ```sh
 cp .env.example .env   # fill in SHIPWRIGHTS_SESSION, AI key, Slack tokens
 uv sync
+uv run playwright install chromium   # headless browser for demo page renders
 ```
 
 To pin the LLM to a specific OpenRouter provider (e.g. Alibaba Cloud Int.):
@@ -48,6 +49,11 @@ To pin the LLM to a specific OpenRouter provider (e.g. Alibaba Cloud Int.):
 rather than falling back unless `OPENROUTER_ALLOW_FALLBACKS=true`).
 
 PDF reports need the `typst` binary (bundled in the Docker image).
+
+Demo pages are rendered in headless Chromium and their screenshot described by a
+vision model (`VISION_MODEL_NAME`, default `qwen/qwen3-vl-8b-thinking`) as extra
+evidence for the review agent. Disable with `BROWSER_RENDER_ENABLED=false` if
+Chromium isn't available.
 
 ## Usage
 

@@ -73,6 +73,22 @@ class Settings(BaseSettings):
     reasoning_effort: Literal["low", "medium", "high"] = "medium"
     agent_timeout: float = 120.0
 
+    # Browser render + vision describer (demo "does this look right?" evidence)
+    browser_render_enabled: bool = Field(
+        default=True,
+        description=(
+            "Render demo pages in headless Chromium and describe the screenshot "
+            "with the vision model. Requires `playwright install chromium`."
+        ),
+    )
+    vision_model_name: str = Field(
+        default="qwen/qwen3-vl-8b-thinking",
+        description="Vision model that describes rendered page screenshots.",
+    )
+    render_timeout: float = Field(
+        default=20.0, ge=5.0, description="Page-load timeout (seconds) for browser renders."
+    )
+
     # Reviews
     max_concurrent_reviews: int = Field(default=2, ge=1)
     pdf_dir: Path = Path("data/pdfs")

@@ -21,6 +21,10 @@ RUN uv sync --frozen --no-dev --no-install-project
 COPY src ./src
 RUN uv sync --frozen --no-dev
 
+# Headless Chromium for demo page renders (review_render_page / packet pre-render)
+RUN uv run --no-sync playwright install --with-deps chromium && \
+    rm -rf /var/lib/apt/lists/*
+
 # Watcher state + generated PDFs persist here (mount a volume)
 RUN mkdir -p /app/data/pdfs
 

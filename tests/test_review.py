@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import shutil
 
 import httpx
 import pytest
+from pydantic_ai import Agent
 from pydantic_ai.models.test import TestModel
 
 from clanker.config import Settings
@@ -13,6 +15,7 @@ from clanker.review.agent import (
     build_review_instructions,
     create_review_agent,
 )
+from clanker.review.browser import RenderResult, render_page
 from clanker.review.models import (
     CheckResult,
     ChecksResult,
@@ -23,6 +26,7 @@ from clanker.review.models import (
 from clanker.review.packet import build_packet
 from clanker.review.pdf import generate_review_pdf
 from clanker.review.tools import ReviewTools
+from clanker.review.vision import PageRenderer
 from tests.conftest import make_cert
 
 
@@ -141,6 +145,110 @@ async def test_fetch_page_text_reports_reachability():
     assert payload["flags"] == ["railway"]
     assert "hi there" in payload["text"]
     await tools.aclose()
+
+
+async def test_render_page_rejects_invalid_url():
+    result = await render_page("ftp://nope")
+    assert result.ok is False
+    assert "Invalid URL" in (result.error or "")
+
+
+async def test_render_tool_without_renderer_errors():
+    tools = ReviewTools()
+    payload = json.loads(await tools.review_render_page("https://example.com"))
+    assert payload["ok"] is False
+    assert "not available" in payload["error"]
+    await tools.aclose()
+
+
+async def test_page_renderer_describes_screenshot(monkeypatch):
+    async def fake_render(url, *, load_timeout):
+        return RenderResult(
+            ok=True,
+            url=url,
+            final_url=url,
+            status_code=200,
+            text="Welcome to my site",
+            viewport_mostly_empty=False,
+            screenshot=b"\xff\xd8fake-jpeg",
+        )
+
+    monkeypatch.setattr("clanker.review.vision.render_page", fake_render)
+    vision = Agent(TestModel(custom_output_text="A landing page with a large purple heading."))
+    renderer = PageRenderer(make_settings(), agent=vision)
+
+    payload = await renderer.render_payload("https://demo.example.com")
+    assert payload["ok"] is True
+    assert payload["reachable"] is True
+    assert payload["rendered_text"] == "Welcome to my site"
+    assert payload["screenshot_description"] == "A landing page with a large purple heading."
+
+
+class FakeRenderer:
+    async def render_json(self, url: str) -> str:
+        return json.dumps(
+            {
+                "ok": True,
+                "url": url,
+                "final_url": url,
+                "status_code": 200,
+                "reachable": True,
+                "viewport_mostly_empty": False,
+                "rendered_text": "Welcome to my site",
+                "screenshot_description": "A landing page with a large purple heading.",
+            }
+        )
+
+
+async def test_build_packet_includes_demo_render(client, dashboard):
+    dashboard.details["c1"] = make_cert("c1")
+    tools = ReviewTools(renderer=FakeRenderer())
+    not_found = httpx.MockTransport(lambda request: httpx.Response(404))
+    tools._github = httpx.AsyncClient(base_url="https://api.github.com", transport=not_found)
+    tools._web = httpx.AsyncClient(transport=not_found)
+
+    packet = await build_packet(client, "c1", tools=tools)
+    prompt = packet.to_prompt()
+    assert "## Demo page render (pre-fetched" in prompt
+    assert "A landing page with a large purple heading." in prompt
+    assert "Welcome to my site" in prompt
+    await tools.aclose()
+
+
+async def test_render_page_real_chromium():
+    body = (
+        b"<html><body><h1>Hello Render</h1>"
+        b"<p>from a real browser, with enough visible text on the page that the "
+        b"mostly-empty viewport heuristic does not trip on this fixture</p>"
+        b"</body></html>"
+    )
+
+    async def handle(reader, writer):
+        await reader.read(2048)
+        writer.write(
+            b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: "
+            + str(len(body)).encode()
+            + b"\r\nConnection: close\r\n\r\n"
+            + body
+        )
+        await writer.drain()
+        writer.close()
+
+    server = await asyncio.start_server(handle, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    try:
+        result = await render_page(f"http://127.0.0.1:{port}/")
+    finally:
+        server.close()
+        await server.wait_closed()
+
+    if not result.ok and "install" in (result.error or "").lower():
+        pytest.skip(f"chromium not installed: {result.error}")
+    assert result.ok, result.error
+    assert result.status_code == 200
+    assert "Hello Render" in result.text
+    assert result.viewport_mostly_empty is False
+    assert result.screenshot and result.screenshot[:2] == b"\xff\xd8"  # JPEG magic
 
 
 @pytest.mark.skipif(shutil.which("typst") is None, reason="typst not installed")

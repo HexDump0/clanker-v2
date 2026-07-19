@@ -19,6 +19,7 @@ from clanker.config import Settings, configure_observability
 from clanker.review import ReviewRunner
 from clanker.review.agent import create_chat_agent, create_review_agent
 from clanker.review.tools import ReviewTools
+from clanker.review.vision import PageRenderer
 from clanker.shipwrights import CertSummary, ShipwrightsClient
 from clanker.slack.announcer import Announcer
 from clanker.watcher import Watcher
@@ -42,9 +43,11 @@ class AppContext:
 def build_app(settings: Settings, *, with_slack: bool = True) -> AppContext:
     """Construct the full object graph (no network calls)."""
     client = ShipwrightsClient.from_settings(settings)
+    renderer = PageRenderer(settings) if settings.browser_render_enabled else None
     tools = ReviewTools(
         github_token=settings.github_token,
         stardance_session=settings.stardance_session,
+        renderer=renderer,
     )
     review_agent = create_review_agent(settings, tools)
     runner = ReviewRunner(agent=review_agent, client=client, settings=settings, tools=tools)
