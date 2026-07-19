@@ -39,8 +39,11 @@ tools for everything deeper.
   `blocked_by_challenge` instead of content when the page is a challenge interstitial.
   Note: this is a plain fetch with no JavaScript — client-only-rendered (CSR) apps may
   show little text even when the demo works
-- `review_fetch_stardance_project(project_url)` — Stardance project page text (fallback
-  when packet fields are not enough)
+- `review_fetch_stardance_project(project_url)` — Stardance ship/project page text
+  (fallback when packet fields are not enough). Pass the "Stardance ship page" URL from
+  the packet verbatim; never build a `/projects/{id}` URL from the cert id (the external
+  id is a ship id, not a project id, so it resolves to the wrong project). A
+  `redirected_away` result means login is missing/expired or the project was removed
 - `review_check_package(url)` — verify a published package on npm / PyPI / crates.io:
   existence, first/last publish dates, version count, download counts. Use for
   "I published a package" claims and to check the first-publish date against the event

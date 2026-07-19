@@ -42,7 +42,10 @@ class AppContext:
 def build_app(settings: Settings, *, with_slack: bool = True) -> AppContext:
     """Construct the full object graph (no network calls)."""
     client = ShipwrightsClient.from_settings(settings)
-    tools = ReviewTools(github_token=settings.github_token)
+    tools = ReviewTools(
+        github_token=settings.github_token,
+        stardance_session=settings.stardance_session,
+    )
     review_agent = create_review_agent(settings, tools)
     runner = ReviewRunner(agent=review_agent, client=client, settings=settings)
 

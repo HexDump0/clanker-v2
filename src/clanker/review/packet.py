@@ -12,7 +12,10 @@ from dataclasses import dataclass
 from clanker.shipwrights import CertDetail, GitHubData, NotFoundError, ShipwrightsClient
 
 README_LIMIT = 30000
-STARDANCE_PROJECT_BASE = "https://stardance.hackclub.com/projects"
+# The cert's external_id is the Stardance *ship* id, not a public project id.
+# The project is reachable only through the admin ship page (login required) —
+# /projects/{external_id} points at an unrelated project, so never build that.
+STARDANCE_SHIP_BASE = "https://stardance.hackclub.com/admin/certification/ship"
 
 
 @dataclass(slots=True)
@@ -23,9 +26,9 @@ class ReviewPacket:
 
     @property
     def stardance_url(self) -> str | None:
-        """Public Stardance project page, if the cert carries its project id."""
+        """Stardance admin ship page for this cert (requires a Stardance login)."""
         if self.cert.external_id:
-            return f"{STARDANCE_PROJECT_BASE}/{self.cert.external_id}"
+            return f"{STARDANCE_SHIP_BASE}/{self.cert.external_id}?via=dashboard"
         return None
 
     def to_prompt(self) -> str:
@@ -36,7 +39,7 @@ class ReviewPacket:
             "",
             "## Submission",
             f"- Project name: {c.project_name}",
-            f"- Stardance project: {self.stardance_url or '(unknown project id)'}",
+            f"- Stardance ship page (needs login): {self.stardance_url or '(unknown ship id)'}",
             f"- Claimed project type: {c.project_type or 'n/a'} "
             f"(AI-detected: {c.ai_type or 'n/a'})",
             f"- Ship type: {c.ship_type or 'n/a'}",

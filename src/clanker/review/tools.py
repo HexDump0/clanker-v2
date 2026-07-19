@@ -15,10 +15,12 @@ import html
 import json
 import re
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
 GITHUB_API = "https://api.github.com"
+STARDANCE_COOKIE_NAME = "_stardance_session_v3"
 TIMEOUT = 20.0
 BROWSER_HEADERS = {
     "User-Agent": (
@@ -198,7 +200,7 @@ class ReviewTools:
     Register on an agent with ``tools=review_tools.all()``.
     """
 
-    def __init__(self, *, github_token: str = "") -> None:
+    def __init__(self, *, github_token: str = "", stardance_session: str = "") -> None:
         github_headers = {"Accept": "application/vnd.github+json", "User-Agent": "clanker/0.1"}
         if github_token:
             github_headers["Authorization"] = f"Bearer {github_token}"
@@ -208,6 +210,10 @@ class ReviewTools:
         self._web = httpx.AsyncClient(
             timeout=TIMEOUT, follow_redirects=True, headers=BROWSER_HEADERS
         )
+        # Tolerate a pasted "name=value;" cookie; keep only the value. Sent solely
+        # on stardance.hackclub.com requests, never on arbitrary demo fetches.
+        raw = stardance_session.strip().rstrip(";").strip()
+        self._stardance_session = raw.removeprefix(f"{STARDANCE_COOKIE_NAME}=").strip()
 
     async def aclose(self) -> None:
         await self._github.aclose()
@@ -572,40 +578,56 @@ class ReviewTools:
             return _err(f"Failed to fetch page: {e}")
 
     async def review_fetch_stardance_project(self, project_url: str) -> str:
-        """Fetch a public Stardance project page: structured meta + visible text.
+        """Fetch a Stardance project/ship page: structured meta + visible text.
+
+        Pass the Stardance ship page from the packet
+        (``/admin/certification/ship/{id}``) — that admin URL needs a Stardance
+        login, so this sends the configured session cookie. Public
+        ``/projects/{id}`` URLs also work but the cert's external_id is the *ship*
+        id, not a project id, so never construct a /projects/ URL from it.
 
         Returns ``meta`` (title, author, project_type, and the canonical
         "N devlogs · M hours worked" description from the OG tags) plus the
         stripped devlog text. Fallback only — the packet's
         ai_declaration/updated_project fields are authoritative when present.
 
-        Only works on public ``/projects/{id}`` URLs. A redirect to the site root
-        is reported as an error (``redirected_away: true``) rather than silently
-        returning the homepage — that can mean a gated/admin URL, but for a
-        genuine ``/projects/{id}`` URL it usually means the project was removed
-        (e.g. banned for fraud), which is itself a review signal worth flagging.
+        A redirect to the site root is reported as an error
+        (``redirected_away: true``) instead of silently returning the homepage:
+        it means the login cookie is missing/expired, or the project was removed
+        (e.g. banned for fraud) — a review signal worth flagging.
         """
         if not project_url or "stardance.hackclub.com" not in project_url:
             return _err(f"Not a Stardance URL: {project_url}")
+        cookies = (
+            {STARDANCE_COOKIE_NAME: self._stardance_session}
+            if self._stardance_session
+            else None
+        )
         try:
-            r = await self._web.get(project_url)
+            r = await self._web.get(project_url, cookies=cookies)
             if r.status_code >= 400:
                 return _err(f"HTTP {r.status_code} fetching Stardance project")
             final_url = str(r.url)
-            if "/projects/" not in final_url:
+            # An unauthenticated / removed page bounces to the site root ("" or "/").
+            if not urlparse(final_url).path.strip("/"):
+                authed = bool(self._stardance_session)
+                reason = (
+                    "the Stardance login cookie is missing or expired"
+                    if not authed
+                    else "the login cookie was rejected, or the project was removed "
+                    "(e.g. banned for fraud)"
+                )
                 return json.dumps(
                     {
                         "ok": False,
                         "redirected_away": True,
+                        "authenticated": authed,
                         "url": project_url,
                         "final_url": final_url,
                         "error": (
-                            f"Requested a project page but was redirected to {final_url}. "
-                            "For a public /projects/{id} URL this usually means the project "
-                            "no longer exists — removed or banned (possible fraud) — which "
-                            "is a review signal. It can also mean the URL was gated/admin "
-                            "or invalid. Verify the project id and treat a vanished project "
-                            "with suspicion."
+                            f"Requested {project_url} but was redirected to the site root "
+                            f"({final_url}); {reason}. A vanished project is a review signal "
+                            "— treat with suspicion once login is confirmed working."
                         ),
                     }
                 )

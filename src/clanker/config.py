@@ -32,6 +32,15 @@ class Settings(BaseSettings):
         description="Dashboard session JWT (the `session` cookie value).",
     )
     shipwrights_workplace: str = "stardance"
+    stardance_session: str = Field(
+        default="",
+        description=(
+            "Stardance (stardance.hackclub.com) login cookie value — the "
+            "`_stardance_session_v3` cookie. Lets review_fetch_stardance_project "
+            "load the auth-gated admin ship page. Value only; a leading "
+            "`_stardance_session_v3=` prefix is tolerated."
+        ),
+    )
 
     # Watcher
     watcher_poll_interval: float = Field(default=30.0, ge=5.0)
