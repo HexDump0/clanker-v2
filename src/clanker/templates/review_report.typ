@@ -87,14 +87,14 @@
   margin: (x: 1.5cm, y: 2cm),
   header: align(right)[
     #text(fill: hc-slate, size: 8pt, weight: "bold", font: mono)[
-      SW-CLANKER ™
+      SW-CLANKER V2
     ]
   ],
   footer: context {
     set text(size: 8pt, fill: hc-slate, font: sans)
     grid(
       columns: (1fr, auto),
-      align(left)[Made by Floppy · Powered by Hack Club AI],
+      align(left)[Made by Floppy],
       align(right)[Page #counter(page).display("1 of 1", both: true)],
     )
   },
