@@ -1,17 +1,25 @@
 """Build the submission packet the review agent starts from.
 
 Pre-fetches everything the dashboard already has (detail + cached GitHub data +
-cached README + prior reviews) so the agent spends its tool calls on actual
-investigation instead of re-downloading basics.
+cached README + prior reviews) plus the deterministic lookups the agent used to
+burn tool rounds on every run (repo tree, languages, Stardance ship page), so
+the agent spends its tool calls on actual investigation instead of
+re-downloading basics.
 """
 
 from __future__ import annotations
 
+import asyncio
+import json
+from collections.abc import Awaitable
 from dataclasses import dataclass
+from typing import Any
 
+from clanker.review.tools import ReviewTools
 from clanker.shipwrights import CertDetail, GitHubData, NotFoundError, ShipwrightsClient
 
 README_LIMIT = 30000
+STARDANCE_TEXT_LIMIT = 12000
 # The cert's external_id is the Stardance *ship* id, not a public project id.
 # The project is reachable only through the admin ship page (login required) —
 # /projects/{external_id} points at an unrelated project, so never build that.
@@ -23,6 +31,11 @@ class ReviewPacket:
     cert: CertDetail
     github: GitHubData | None
     readme: str
+    # Parsed tool payloads (``ok`` dicts), pre-fetched so the agent doesn't
+    # spend a model round asking for them. None when unavailable/failed.
+    tree: dict[str, Any] | None = None
+    languages: dict[str, Any] | None = None
+    stardance: dict[str, Any] | None = None
 
     @property
     def stardance_url(self) -> str | None:
@@ -74,6 +87,34 @@ class ReviewPacket:
                 message = (commit.message or "").splitlines()[0][:100]
                 lines.append(f"- {commit.short_sha or '?'} {when} {author}: {message}")
 
+        if self.languages or self.tree:
+            lines += ["", "## Repo structure (pre-fetched — do not re-fetch)"]
+            if self.languages:
+                langs = self.languages.get("languages") or {}
+                breakdown = ", ".join(f"{name} ({size} bytes)" for name, size in langs.items())
+                lines.append(f"- Languages: {breakdown or '(none reported)'}")
+            if self.tree:
+                files = self.tree.get("files") or []
+                count = self.tree.get("file_count", len(files))
+                suffix = " (listing truncated)" if self.tree.get("truncated") else ""
+                lines.append(f"- File tree ({count} entries{suffix}):")
+                lines += [f"  - {path}" for path in files]
+
+        if self.stardance:
+            lines += ["", "## Stardance ship page (pre-fetched — do not re-fetch)"]
+            if self.stardance.get("ok"):
+                for key, value in (self.stardance.get("meta") or {}).items():
+                    lines.append(f"- {key}: {value}")
+                text = self.stardance.get("text") or ""
+                if len(text) > STARDANCE_TEXT_LIMIT:
+                    text = text[:STARDANCE_TEXT_LIMIT] + " ... (truncated)"
+                if text:
+                    lines += ["", "```", text, "```"]
+            else:
+                # Surface the failure verbatim — a redirected-away ship page is
+                # itself a review signal (removed project / expired login).
+                lines.append(f"- fetch failed: {self.stardance.get('error') or 'unknown error'}")
+
         lines += ["", "## README (cached by dashboard)"]
         if self.readme:
             readme = self.readme
@@ -87,21 +128,63 @@ class ReviewPacket:
         return "\n".join(lines)
 
 
-async def build_packet(client: ShipwrightsClient, cert_id: str) -> ReviewPacket:
+async def _tool_payload(call: Awaitable[str]) -> dict[str, Any] | None:
+    """Run a ReviewTools coroutine and parse its JSON payload; None on failure."""
+    try:
+        data = json.loads(await call)
+    except Exception:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+async def build_packet(
+    client: ShipwrightsClient, cert_id: str, tools: ReviewTools | None = None
+) -> ReviewPacket:
     cert = await client.get_certification(cert_id)
 
-    github: GitHubData | None = None
-    try:
-        github = await client.get_github(cert_id)
-    except NotFoundError:
-        pass
-    except Exception:
-        # GitHub cache failures shouldn't kill the review — the agent has tools.
-        github = None
+    async def get_github() -> GitHubData | None:
+        try:
+            return await client.get_github(cert_id)
+        except NotFoundError:
+            return None
+        except Exception:
+            # GitHub cache failures shouldn't kill the review — the agent has tools.
+            return None
 
-    try:
-        readme = await client.get_readme(cert_id)
-    except Exception:
-        readme = ""
+    async def get_readme() -> str:
+        try:
+            return await client.get_readme(cert_id)
+        except Exception:
+            return ""
 
-    return ReviewPacket(cert=cert, github=github, readme=readme)
+    async def get_tree() -> dict[str, Any] | None:
+        if not (tools and cert.repo_url):
+            return None
+        payload = await _tool_payload(tools.review_get_github_repo_tree(cert.repo_url))
+        return payload if payload and payload.get("ok") else None
+
+    async def get_languages() -> dict[str, Any] | None:
+        if not (tools and cert.repo_url):
+            return None
+        payload = await _tool_payload(tools.review_get_github_languages(cert.repo_url))
+        return payload if payload and payload.get("ok") else None
+
+    async def get_stardance() -> dict[str, Any] | None:
+        if not (tools and cert.external_id):
+            return None
+        url = f"{STARDANCE_SHIP_BASE}/{cert.external_id}?via=dashboard"
+        # Keep non-ok payloads: redirected_away is a review signal, not a fetch bug.
+        return await _tool_payload(tools.review_fetch_stardance_project(url))
+
+    github, readme, tree, languages, stardance = await asyncio.gather(
+        get_github(), get_readme(), get_tree(), get_languages(), get_stardance()
+    )
+
+    return ReviewPacket(
+        cert=cert,
+        github=github,
+        readme=readme,
+        tree=tree,
+        languages=languages,
+        stardance=stardance,
+    )

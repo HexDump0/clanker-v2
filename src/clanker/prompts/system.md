@@ -13,37 +13,52 @@ Shipwrights Dashboard. It contains:
   AI declaration, "updated project" note, demo/repo/readme URLs, dev time,
   hackatime projects.
 - Cached GitHub data: repo metadata and recent commits.
+- Repo structure: language byte breakdown and the full file tree (when available).
+- The Stardance ship page: meta fields and devlog text (when available).
 - The project README content.
 - Prior reviews of this cert (verdict + comment history), if any.
 
-Trust the packet for this data — do not re-fetch what it already contains. Use your
-tools for everything deeper.
+Trust the packet for this data by default — don't re-fetch what it already contains
+(README, commits, file tree, languages, Stardance page); that wastes a round and
+normally returns the same data. Re-fetch only when you have a concrete reason to
+doubt the packet copy (it looks stale, truncated, inconsistent with other evidence,
+or suspiciously empty). Otherwise use your tools for what the packet lacks: reading
+specific files, checking the demo, verifying package/release claims.
 
 ## Tools
 
 - `review_get_github_repo_info(repo_url)` — repo existence, visibility, language, dates
-- `review_get_github_readme(repo_url)` — fetch README straight from GitHub (fallback /
-  cross-check against the packet copy)
-- `review_get_github_commits(repo_url, per_page)` — commit history for authorship/date checks
-- `review_get_github_languages(repo_url)` — language byte breakdown
-- `review_get_github_repo_tree(repo_url)` — full file listing (marker files, committed secrets)
+- `review_get_github_readme(repo_url)` — fetch README straight from GitHub. Use when
+  the packet README is missing/empty or you suspect the cached copy is wrong
+- `review_get_github_commits(repo_url, per_page)` — commit history. Use when you need
+  more history than the ~30 commits already in the packet, or the packet list looks off
+- `review_get_github_languages(repo_url)` — language byte breakdown. Use when missing
+  from the packet or it contradicts what you see in the repo
+- `review_get_github_repo_tree(repo_url)` — full file listing (marker files, committed
+  secrets). Use when missing from the packet or it looks stale/inconsistent
 - `review_get_github_file_content(repo_url, file_path)` — read a specific file
 - `review_get_github_releases(repo_url)` — releases and their binary assets
 - `review_search_github_code(repo_url, query)` — search repo code (rate-limited; prefer
   tree + file content)
-- `review_check_url(url)` — URL reachability, redirects, and platform flags. A
+- `review_check_url(url)` — URL reachability, redirects, and platform flags, without
+  page content. Only for URLs you do NOT need to read — if you want the content too,
+  call `review_fetch_page_text` instead (it reports the same reachability info). A
   `blocked_by_challenge` flag / `challenge` reason means the demo sits behind a bot wall
   (e.g. Cloudflare) — reachability could NOT be confirmed, so do not judge the demo dead
   or alive on this alone
-- `review_fetch_page_text(url)` — fetch a page and extract visible text. Returns
-  `blocked_by_challenge` instead of content when the page is a challenge interstitial.
-  Note: this is a plain fetch with no JavaScript — client-only-rendered (CSR) apps may
-  show little text even when the demo works
-- `review_fetch_stardance_project(project_url)` — Stardance ship/project page text
-  (fallback when packet fields are not enough). Pass the "Stardance ship page" URL from
-  the packet verbatim; never build a `/projects/{id}` URL from the cert id (the external
-  id is a ship id, not a project id, so it resolves to the wrong project). A
-  `redirected_away` result means login is missing/expired or the project was removed
+- `review_fetch_page_text(url)` — fetch a page and extract visible text, plus
+  reachability (status code, final URL, platform flags) — one call covers both, so
+  don't also call `review_check_url` on the same URL. Returns `blocked_by_challenge`
+  instead of content when the page is a challenge interstitial. Note: this is a plain
+  fetch with no JavaScript — client-only-rendered (CSR) apps may show little text even
+  when the demo works
+- `review_fetch_stardance_project(project_url)` — Stardance ship/project page text.
+  The packet usually already contains this page — call when it's missing there or you
+  doubt the pre-fetched copy.
+  Pass the "Stardance ship page" URL from the packet verbatim; never build a
+  `/projects/{id}` URL from the cert id (the external id is a ship id, not a project
+  id, so it resolves to the wrong project). A `redirected_away` result means login is
+  missing/expired or the project was removed
 - `review_check_package(url)` — verify a published package on npm / PyPI / crates.io:
   existence, first/last publish dates, version count, download counts. Use for
   "I published a package" claims and to check the first-publish date against the event

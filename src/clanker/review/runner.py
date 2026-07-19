@@ -17,6 +17,7 @@ from clanker.config import Settings
 from clanker.review.models import ReviewOutput
 from clanker.review.packet import ReviewPacket, build_packet
 from clanker.review.pdf import PdfError, generate_review_pdf
+from clanker.review.tools import ReviewTools
 from clanker.shipwrights import ShipwrightsClient
 
 logger = logging.getLogger(__name__)
@@ -39,14 +40,16 @@ class ReviewRunner:
         agent: Agent[None, ReviewOutput],
         client: ShipwrightsClient,
         settings: Settings,
+        tools: ReviewTools | None = None,
     ) -> None:
         self._agent = agent
         self._client = client
         self._settings = settings
+        self._tools = tools
 
     async def review_cert(self, cert_id: str) -> ReviewOutcome:
         """Run the full pipeline for one cert. Raises on unrecoverable errors."""
-        packet = await build_packet(self._client, cert_id)
+        packet = await build_packet(self._client, cert_id, tools=self._tools)
         logger.info("Reviewing cert %s (%r)", cert_id, packet.cert.project_name)
 
         result = await self._agent.run(packet.to_prompt())

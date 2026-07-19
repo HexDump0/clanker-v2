@@ -277,8 +277,9 @@ class ReviewTools:
     async def review_get_github_readme(self, repo_url: str) -> str:
         """Fetch the README of a GitHub repository straight from GitHub.
 
-        The packet already contains the dashboard's cached README — use this to
-        cross-check it or when the packet copy is missing/empty.
+        The packet already contains the dashboard's cached README — call this
+        when the packet copy is missing/empty or you have concrete reason to
+        doubt it, not as a routine cross-check.
         """
         parsed = _parse_github_url(repo_url)
         if not parsed:
@@ -307,8 +308,9 @@ class ReviewTools:
     async def review_get_github_commits(self, repo_url: str, per_page: int = 30) -> str:
         """Fetch recent commits: authors, dates, messages.
 
-        Use for pre-event activity (commits before Dec 25, 2024), authorship,
-        and suspicious patterns (single huge commit, no commits).
+        The packet already lists the ~30 most recent commits — call this when
+        you need deeper history than the packet shows (e.g. pre-event activity
+        beyond it), the packet has no commits, or its list looks wrong.
         """
         parsed = _parse_github_url(repo_url)
         if not parsed:
@@ -343,7 +345,11 @@ class ReviewTools:
             return _err(f"Failed to fetch commits: {e}")
 
     async def review_get_github_languages(self, repo_url: str) -> str:
-        """Language -> bytes breakdown; helps detect the actual project type."""
+        """Language -> bytes breakdown; helps detect the actual project type.
+
+        Usually pre-fetched into the packet ("Repo structure") — call when the
+        packet lacks it or the pre-fetched copy looks wrong.
+        """
         parsed = _parse_github_url(repo_url)
         if not parsed:
             return _err(f"Could not parse GitHub URL: {repo_url}")
@@ -360,7 +366,9 @@ class ReviewTools:
         """Full file listing of the repo.
 
         Use to detect project type via marker files (package.json, Cargo.toml,
-        …) and to spot committed secrets (.env files etc.).
+        …) and to spot committed secrets (.env files etc.). Usually pre-fetched
+        into the packet ("Repo structure") — call when the packet lacks it or
+        the pre-fetched copy looks wrong.
         """
         parsed = _parse_github_url(repo_url)
         if not parsed:
@@ -485,8 +493,9 @@ class ReviewTools:
         """Check if a URL is reachable: status code, final URL, content type.
 
         Also flags problematic platforms (google_drive, colab, huggingface,
-        render, railway, ngrok, localhost). Does NOT return page content — use
-        review_fetch_page_text for that.
+        render, railway, ngrok, localhost). Does NOT return page content.
+        If you are going to read the page anyway, call review_fetch_page_text
+        directly — it reports the same reachability info alongside the text.
         """
         if not url or not url.startswith(("http://", "https://")):
             return _err(f"Invalid URL: {url}")
@@ -538,15 +547,29 @@ class ReviewTools:
         """Fetch a page and return its visible text (HTML stripped, 20k chars max).
 
         Use to read demo pages, check for AI-generated site content, or verify a
-        deployed app shows real content.
+        deployed app shows real content. Also reports reachability (status code,
+        final URL after redirects, platform flags) — when you want the content
+        anyway, a separate review_check_url call is redundant.
         """
         if not url or not url.startswith(("http://", "https://")):
             return _err(f"Invalid URL: {url}")
+        lower = url.lower()
+        flags = list(dict.fromkeys(flag for marker, flag in _URL_FLAGS.items() if marker in lower))
         try:
             r = await self._web.get(url)
             challenge = _detect_challenge(r)
             if r.status_code >= 400 and not challenge:
-                return _err(f"HTTP {r.status_code} fetching {url}")
+                return json.dumps(
+                    {
+                        "ok": False,
+                        "url": url,
+                        "final_url": str(r.url),
+                        "status_code": r.status_code,
+                        "reachable": False,
+                        "flags": flags or None,
+                        "error": f"HTTP {r.status_code} fetching {url}",
+                    }
+                )
             content_type = r.headers.get("content-type", "")
             text = _strip_html(r.text) if "text/html" in content_type else r.text
             if challenge:
@@ -557,7 +580,10 @@ class ReviewTools:
                         "ok": False,
                         "blocked_by_challenge": True,
                         "url": url,
+                        "final_url": str(r.url),
+                        "status_code": r.status_code,
                         "challenge": challenge,
+                        "flags": flags or None,
                         "error": (
                             f"Page is behind a bot challenge ({challenge}); the returned "
                             "content is the interstitial, not the real app. Reachability "
@@ -570,6 +596,10 @@ class ReviewTools:
                 {
                     "ok": True,
                     "url": url,
+                    "final_url": str(r.url),
+                    "status_code": r.status_code,
+                    "reachable": 200 <= r.status_code < 400,
+                    "flags": flags or None,
                     "text": _truncate(text, 20000),
                     "content_type": content_type,
                 }
@@ -579,6 +609,10 @@ class ReviewTools:
 
     async def review_fetch_stardance_project(self, project_url: str) -> str:
         """Fetch a Stardance project/ship page: structured meta + visible text.
+
+        Usually pre-fetched into the packet ("Stardance ship page") — call when
+        the packet lacks it, you doubt the pre-fetched copy, or you need a page
+        the packet doesn't include.
 
         Pass the Stardance ship page from the packet
         (``/admin/certification/ship/{id}``) — that admin URL needs a Stardance

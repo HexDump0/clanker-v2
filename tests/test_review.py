@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 import shutil
 
+import httpx
 import pytest
 from pydantic_ai.models.test import TestModel
 
@@ -72,6 +74,73 @@ async def test_build_packet_prompt(client, dashboard):
     assert "Used Copilot for boilerplate" in prompt
     assert "REJECTED: README too thin" in prompt
     assert "# Hi" in prompt  # cached README included
+
+
+async def test_build_packet_prefetches_tree_languages_and_stardance(client, dashboard):
+    dashboard.details["c1"] = {**make_cert("c1"), "externalId": "5257"}
+
+    def github_handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path.endswith("/git/trees/HEAD"):
+            tree = [{"path": "index.html", "type": "blob"}, {"path": "src", "type": "tree"}]
+            return httpx.Response(200, json={"tree": tree})
+        if path.endswith("/languages"):
+            return httpx.Response(200, json={"HTML": 1234, "CSS": 567})
+        return httpx.Response(404)
+
+    def web_handler(request: httpx.Request) -> httpx.Response:
+        assert "stardance.hackclub.com" in request.url.host
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/html"},
+            text=(
+                '<html><head><meta property="og:title" content="My Project"></head>'
+                "<body>devlog: built the thing</body></html>"
+            ),
+        )
+
+    tools = ReviewTools()
+    tools._github = httpx.AsyncClient(
+        base_url="https://api.github.com", transport=httpx.MockTransport(github_handler)
+    )
+    tools._web = httpx.AsyncClient(transport=httpx.MockTransport(web_handler))
+
+    packet = await build_packet(client, "c1", tools=tools)
+    prompt = packet.to_prompt()
+
+    assert "## Repo structure (pre-fetched" in prompt
+    assert "HTML (1234 bytes)" in prompt
+    assert "- index.html" in prompt
+    assert "## Stardance ship page (pre-fetched" in prompt
+    assert "title: My Project" in prompt
+    assert "devlog: built the thing" in prompt
+    await tools.aclose()
+
+
+async def test_build_packet_without_tools_skips_enrichment(client, dashboard):
+    dashboard.details["c1"] = make_cert("c1")
+    packet = await build_packet(client, "c1")
+    prompt = packet.to_prompt()
+    assert packet.tree is None and packet.languages is None and packet.stardance is None
+    assert "pre-fetched" not in prompt
+
+
+async def test_fetch_page_text_reports_reachability():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, headers={"content-type": "text/html"}, text="<html><body>hi there</body></html>"
+        )
+
+    tools = ReviewTools()
+    tools._web = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    payload = json.loads(await tools.review_fetch_page_text("https://example.up.railway.app/"))
+    assert payload["ok"] is True
+    assert payload["reachable"] is True
+    assert payload["status_code"] == 200
+    assert payload["final_url"] == "https://example.up.railway.app/"
+    assert payload["flags"] == ["railway"]
+    assert "hi there" in payload["text"]
+    await tools.aclose()
 
 
 @pytest.mark.skipif(shutil.which("typst") is None, reason="typst not installed")

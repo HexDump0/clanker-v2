@@ -47,7 +47,7 @@ def build_app(settings: Settings, *, with_slack: bool = True) -> AppContext:
         stardance_session=settings.stardance_session,
     )
     review_agent = create_review_agent(settings, tools)
-    runner = ReviewRunner(agent=review_agent, client=client, settings=settings)
+    runner = ReviewRunner(agent=review_agent, client=client, settings=settings, tools=tools)
 
     slack: AsyncWebClient | None = None
     announcer: Announcer | None = None
