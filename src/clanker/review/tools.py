@@ -11,6 +11,7 @@ can reason about, not exceptions.
 
 from __future__ import annotations
 
+import html
 import json
 import re
 from typing import Any
@@ -55,17 +56,108 @@ def _parse_github_url(url: str) -> tuple[str, str] | None:
     return m.group(1), m.group(2).removesuffix(".git")
 
 
-def _strip_html(html: str) -> str:
-    text = re.sub(r"<script[^>]*>.*?</script>", "", html, flags=re.S | re.I)
-    text = re.sub(r"<style[^>]*>.*?</style>", "", text, flags=re.S | re.I)
-    text = re.sub(r"<[^>]+>", " ", text)
+# Matches a full HTML tag even when an attribute value contains a bare ">"
+# (Stardance's Stimulus actions like `turbo:submit-end->modal#close"` broke the
+# naive `<[^>]+>` strip, leaking attribute fragments into the text).
+_TAG_RE = re.compile(r"""<(?:[^>"']|"[^"]*"|'[^']*')*>""")
+_DROP_ELEMENTS_RE = re.compile(
+    r"<(script|style|noscript|svg|template|head)\b[^>]*>.*?</\1>", re.S | re.I
+)
+
+
+def _strip_html(markup: str) -> str:
+    text = _DROP_ELEMENTS_RE.sub(" ", markup)
+    text = _TAG_RE.sub(" ", text)
+    text = html.unescape(text)
     return re.sub(r"\s+", " ", text).strip()
+
+
+# name/property -> normalised key we surface to the agent. First match wins, so
+# the richer `og:`/`twitter:` variants take precedence over bare `name=`.
+_META_FIELDS = {
+    "og:title": "title",
+    "twitter:title": "title",
+    "og:description": "description",
+    "description": "description",
+    "author": "author",
+    "og:image": "image",
+    "og:url": "canonical_url",
+}
+_META_TAG_RE = re.compile(r"<meta\b[^>]*>", re.I)
+_META_KEY_RE = re.compile(r"""(?:property|name)=["']([^"']+)["']""", re.I)
+_META_CONTENT_RE = re.compile(r"""content=["']([^"']*)["']""", re.I)
+_PROJECT_TAG_RE = re.compile(r"project-show__tag--([a-z0-9_-]+)", re.I)
+
+
+def _extract_meta(markup: str) -> dict[str, str]:
+    """Pull the clean structured fields out of the page's <meta>/OG tags.
+
+    Stardance server-renders an OG block with canonical title, author, and a
+    "N devlogs · M hours worked" description — far cleaner than scraping the
+    body, and fresher than the numbers baked into the visible DOM.
+    """
+    fields: dict[str, str] = {}
+    for tag in _META_TAG_RE.findall(markup):
+        key = _META_KEY_RE.search(tag)
+        content = _META_CONTENT_RE.search(tag)
+        if not key or not content:
+            continue
+        dest = _META_FIELDS.get(key.group(1).lower())
+        if dest and dest not in fields:
+            value = html.unescape(content.group(1)).strip()
+            if value:
+                fields[dest] = value
+    if badge := _PROJECT_TAG_RE.search(markup):
+        fields["project_type"] = badge.group(1).lower()
+    return fields
 
 
 def _truncate(text: str, limit: int) -> str:
     if len(text) <= limit:
         return text
     return text[:limit] + f"\n\n... (truncated, original length: {len(text)} chars)"
+
+
+# Body markers left by bot-challenge interstitials (Cloudflare, Turnstile, etc.).
+# These pages return HTTP 200 but contain no real app content, so a naive
+# reachability check would falsely pass them.
+_CHALLENGE_MARKERS = (
+    "just a moment",
+    "checking your browser",
+    "enable javascript and cookies to continue",
+    "cf-browser-verification",
+    "cf_chl_opt",
+    "challenge-platform",
+    "/cdn-cgi/challenge-platform",
+    "cf-turnstile",
+    "turnstile",
+    "attention required! | cloudflare",
+    "please verify you are a human",
+    "ddos protection by cloudflare",
+    "ray id",
+)
+
+
+def _detect_challenge(response: httpx.Response, text: str | None = None) -> str | None:
+    """Return a short reason if the response looks like a bot-challenge wall.
+
+    Cloudflare/Turnstile challenges serve HTTP 200 (or 403/503) with a JS
+    interstitial instead of the real page. We look at the ``cf-mitigated``
+    header, the server banner on a blocking status, and known body markers.
+    """
+    headers = response.headers
+    if headers.get("cf-mitigated", "").lower() == "challenge":
+        return "cloudflare challenge (cf-mitigated header)"
+    server = headers.get("server", "").lower()
+    if "cloudflare" in server and response.status_code in (403, 429, 503):
+        return f"cloudflare block (HTTP {response.status_code})"
+    body = (text if text is not None else response.text or "").lower()
+    if body:
+        head = body[:6000]
+        for marker in _CHALLENGE_MARKERS:
+            if marker in head:
+                return f"challenge interstitial (matched {marker!r})"
+    return None
 
 
 def _spa_api_url(url: str) -> str | None:
@@ -77,6 +169,26 @@ def _spa_api_url(url: str) -> str | None:
         return f"https://registry.npmjs.org/{m.group(1)}"
     if m := re.match(r"https?://pypi\.org/project/([^/?#]+)", lower):
         return f"https://pypi.org/pypi/{m.group(1)}/json"
+    return None
+
+
+def _parse_package_url(url: str) -> tuple[str, str] | None:
+    """Detect the registry and package name from a package URL.
+
+    Handles the human-facing pages (npmjs.com/package/X, pypi.org/project/X,
+    crates.io/crates/X) and the equivalent registry/API URLs. Package name case
+    is preserved (npm scoped names keep their ``@scope/name`` form).
+    """
+    u = url.strip()
+    npm = r"(@[^/?#]+/[^/?#]+|[^/?#]+)"
+    if m := re.match(rf"https?://(?:www\.)?npmjs\.com/package/{npm}", u, re.I):
+        return ("npm", m.group(1))
+    if m := re.match(rf"https?://registry\.npmjs\.org/{npm}", u, re.I):
+        return ("npm", m.group(1))
+    if m := re.match(r"https?://pypi\.org/(?:project|pypi)/([^/?#]+)", u, re.I):
+        return ("pypi", m.group(1))
+    if m := re.match(r"https?://crates\.io/(?:crates|api/v1/crates)/([^/?#]+)", u, re.I):
+        return ("crates", m.group(1))
     return None
 
 
@@ -115,6 +227,7 @@ class ReviewTools:
             self.review_check_url,
             self.review_fetch_page_text,
             self.review_fetch_stardance_project,
+            self.review_check_package,
         ]
 
     # ---------------------------------------------------------------- github
@@ -387,6 +500,12 @@ class ReviewTools:
                         flags.append("spa_verified_via_api")
                 except Exception:
                     pass
+            # A bot-challenge wall answers 200 but shows no real app — surface it
+            # instead of reporting a false "reachable".
+            challenge = _detect_challenge(r)
+            if challenge:
+                flags.append("blocked_by_challenge")
+                reachable = False
             return _ok(
                 {
                     "url": url,
@@ -394,6 +513,7 @@ class ReviewTools:
                     "status_code": r.status_code,
                     "reachable": reachable,
                     "content_type": r.headers.get("content-type", ""),
+                    "challenge": challenge,
                     "flags": flags or None,
                 }
             )
@@ -418,10 +538,28 @@ class ReviewTools:
             return _err(f"Invalid URL: {url}")
         try:
             r = await self._web.get(url)
-            if r.status_code >= 400:
+            challenge = _detect_challenge(r)
+            if r.status_code >= 400 and not challenge:
                 return _err(f"HTTP {r.status_code} fetching {url}")
             content_type = r.headers.get("content-type", "")
             text = _strip_html(r.text) if "text/html" in content_type else r.text
+            if challenge:
+                # The body is the interstitial, not the app — say so loudly so the
+                # agent doesn't judge the demo on a bot wall.
+                return json.dumps(
+                    {
+                        "ok": False,
+                        "blocked_by_challenge": True,
+                        "url": url,
+                        "challenge": challenge,
+                        "error": (
+                            f"Page is behind a bot challenge ({challenge}); the returned "
+                            "content is the interstitial, not the real app. Reachability "
+                            "cannot be confirmed with a plain fetch."
+                        ),
+                        "text": _truncate(text, 2000),
+                    }
+                )
             return json.dumps(
                 {
                     "ok": True,
@@ -434,10 +572,18 @@ class ReviewTools:
             return _err(f"Failed to fetch page: {e}")
 
     async def review_fetch_stardance_project(self, project_url: str) -> str:
-        """Fetch a Stardance project page's text (AI disclosure, update flag).
+        """Fetch a public Stardance project page: structured meta + visible text.
 
-        Fallback only — the packet's ai_declaration/updated_project fields are
-        authoritative when present.
+        Returns ``meta`` (title, author, project_type, and the canonical
+        "N devlogs · M hours worked" description from the OG tags) plus the
+        stripped devlog text. Fallback only — the packet's
+        ai_declaration/updated_project fields are authoritative when present.
+
+        Only works on public ``/projects/{id}`` URLs. A redirect to the site root
+        is reported as an error (``redirected_away: true``) rather than silently
+        returning the homepage — that can mean a gated/admin URL, but for a
+        genuine ``/projects/{id}`` URL it usually means the project was removed
+        (e.g. banned for fraud), which is itself a review signal worth flagging.
         """
         if not project_url or "stardance.hackclub.com" not in project_url:
             return _err(f"Not a Stardance URL: {project_url}")
@@ -445,8 +591,148 @@ class ReviewTools:
             r = await self._web.get(project_url)
             if r.status_code >= 400:
                 return _err(f"HTTP {r.status_code} fetching Stardance project")
+            final_url = str(r.url)
+            if "/projects/" not in final_url:
+                return json.dumps(
+                    {
+                        "ok": False,
+                        "redirected_away": True,
+                        "url": project_url,
+                        "final_url": final_url,
+                        "error": (
+                            f"Requested a project page but was redirected to {final_url}. "
+                            "For a public /projects/{id} URL this usually means the project "
+                            "no longer exists — removed or banned (possible fraud) — which "
+                            "is a review signal. It can also mean the URL was gated/admin "
+                            "or invalid. Verify the project id and treat a vanished project "
+                            "with suspicion."
+                        ),
+                    }
+                )
             return json.dumps(
-                {"ok": True, "url": project_url, "text": _truncate(_strip_html(r.text), 20000)}
+                {
+                    "ok": True,
+                    "url": project_url,
+                    "final_url": final_url,
+                    "meta": _extract_meta(r.text) or None,
+                    "text": _truncate(_strip_html(r.text), 20000),
+                }
             )
         except Exception as e:
             return _err(f"Failed to fetch Stardance project: {e}")
+
+    async def review_check_package(self, url: str) -> str:
+        """Verify a published package on npm, PyPI, or crates.io.
+
+        Accepts a package page URL (``npmjs.com/package/X``,
+        ``pypi.org/project/X``, ``crates.io/crates/X``, or the equivalent
+        registry URL). Returns whether it exists, first/last publish dates,
+        version count, and download counts where the registry exposes them.
+
+        Use to verify "I published a package" claims: confirm it is real, check
+        the first-publish date against the event window, and gauge whether it has
+        real usage (downloads) or was only just published to tick a box.
+        """
+        parsed = _parse_package_url(url)
+        if not parsed:
+            return _err(f"Not a recognised package URL (npm/PyPI/crates.io): {url}")
+        registry, name = parsed
+        try:
+            if registry == "npm":
+                return await self._check_npm(name)
+            if registry == "pypi":
+                return await self._check_pypi(name)
+            return await self._check_crates(name)
+        except Exception as e:
+            return _err(f"Failed to check package: {e}")
+
+    async def _check_npm(self, name: str) -> str:
+        r = await self._web.get(f"https://registry.npmjs.org/{name}")
+        if r.status_code == 404:
+            return _ok({"registry": "npm", "package": name, "exists": False})
+        if r.status_code != 200:
+            return _err(f"npm registry returned status {r.status_code}")
+        data = r.json()
+        times = data.get("time", {}) or {}
+        repo = data.get("repository")
+        repo_url = repo.get("url") if isinstance(repo, dict) else repo
+        recent = None
+        try:
+            dr = await self._web.get(f"https://api.npmjs.org/downloads/point/last-month/{name}")
+            if dr.status_code == 200:
+                recent = dr.json().get("downloads")
+        except Exception:
+            pass
+        return _ok(
+            {
+                "registry": "npm",
+                "package": name,
+                "exists": True,
+                "latest_version": (data.get("dist-tags") or {}).get("latest"),
+                "first_published": times.get("created"),
+                "last_published": times.get("modified"),
+                "versions_count": len(data.get("versions", {}) or {}),
+                "downloads_last_month": recent,
+                "description": data.get("description"),
+                "homepage": data.get("homepage"),
+                "repository": repo_url,
+            }
+        )
+
+    async def _check_pypi(self, name: str) -> str:
+        r = await self._web.get(f"https://pypi.org/pypi/{name}/json")
+        if r.status_code == 404:
+            return _ok({"registry": "pypi", "package": name, "exists": False})
+        if r.status_code != 200:
+            return _err(f"PyPI returned status {r.status_code}")
+        data = r.json()
+        info = data.get("info", {}) or {}
+        releases = data.get("releases", {}) or {}
+        uploads = sorted(
+            f.get("upload_time_iso_8601") or f.get("upload_time")
+            for files in releases.values()
+            for f in files
+            if f.get("upload_time_iso_8601") or f.get("upload_time")
+        )
+        project_urls = info.get("project_urls") or {}
+        return _ok(
+            {
+                "registry": "pypi",
+                "package": name,
+                "exists": True,
+                "latest_version": info.get("version"),
+                "first_published": uploads[0] if uploads else None,
+                "last_published": uploads[-1] if uploads else None,
+                "versions_count": len(releases),
+                "downloads_last_month": None,  # not exposed by this API
+                "description": info.get("summary"),
+                "author": info.get("author") or info.get("author_email"),
+                "homepage": info.get("home_page") or project_urls.get("Homepage"),
+                "repository": project_urls.get("Source") or project_urls.get("Repository"),
+            }
+        )
+
+    async def _check_crates(self, name: str) -> str:
+        r = await self._web.get(f"https://crates.io/api/v1/crates/{name}")
+        if r.status_code == 404:
+            return _ok({"registry": "crates", "package": name, "exists": False})
+        if r.status_code != 200:
+            return _err(f"crates.io returned status {r.status_code}")
+        data = r.json()
+        crate = data.get("crate", {}) or {}
+        return _ok(
+            {
+                "registry": "crates",
+                "package": name,
+                "exists": True,
+                "latest_version": crate.get("newest_version") or crate.get("max_version"),
+                "first_published": crate.get("created_at"),
+                "last_published": crate.get("updated_at"),
+                "versions_count": len(data.get("versions", []) or []),
+                "downloads_total": crate.get("downloads"),
+                "downloads_recent": crate.get("recent_downloads"),
+                "description": crate.get("description"),
+                "homepage": crate.get("homepage"),
+                "repository": crate.get("repository"),
+            }
+        )

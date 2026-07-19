@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from clanker.shipwrights import CertDetail, GitHubData, NotFoundError, ShipwrightsClient
 
 README_LIMIT = 30000
+STARDANCE_PROJECT_BASE = "https://stardance.hackclub.com/projects"
 
 
 @dataclass(slots=True)
@@ -19,6 +20,13 @@ class ReviewPacket:
     cert: CertDetail
     github: GitHubData | None
     readme: str
+
+    @property
+    def stardance_url(self) -> str | None:
+        """Public Stardance project page, if the cert carries its project id."""
+        if self.cert.external_id:
+            return f"{STARDANCE_PROJECT_BASE}/{self.cert.external_id}"
+        return None
 
     def to_prompt(self) -> str:
         """Render the packet as the user message for the review agent."""
@@ -28,6 +36,7 @@ class ReviewPacket:
             "",
             "## Submission",
             f"- Project name: {c.project_name}",
+            f"- Stardance project: {self.stardance_url or '(unknown project id)'}",
             f"- Claimed project type: {c.project_type or 'n/a'} "
             f"(AI-detected: {c.ai_type or 'n/a'})",
             f"- Ship type: {c.ship_type or 'n/a'}",

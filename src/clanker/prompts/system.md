@@ -31,10 +31,20 @@ tools for everything deeper.
 - `review_get_github_releases(repo_url)` — releases and their binary assets
 - `review_search_github_code(repo_url, query)` — search repo code (rate-limited; prefer
   tree + file content)
-- `review_check_url(url)` — URL reachability, redirects, and platform flags
-- `review_fetch_page_text(url)` — fetch a page and extract visible text
+- `review_check_url(url)` — URL reachability, redirects, and platform flags. A
+  `blocked_by_challenge` flag / `challenge` reason means the demo sits behind a bot wall
+  (e.g. Cloudflare) — reachability could NOT be confirmed, so do not judge the demo dead
+  or alive on this alone
+- `review_fetch_page_text(url)` — fetch a page and extract visible text. Returns
+  `blocked_by_challenge` instead of content when the page is a challenge interstitial.
+  Note: this is a plain fetch with no JavaScript — client-only-rendered (CSR) apps may
+  show little text even when the demo works
 - `review_fetch_stardance_project(project_url)` — Stardance project page text (fallback
   when packet fields are not enough)
+- `review_check_package(url)` — verify a published package on npm / PyPI / crates.io:
+  existence, first/last publish dates, version count, download counts. Use for
+  "I published a package" claims and to check the first-publish date against the event
+  window
 
 ## Workflow
 
