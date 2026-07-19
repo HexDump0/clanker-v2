@@ -168,7 +168,7 @@ class Announcer:
         try:
             await self._slack.chat_postMessage(
                 channel=self._channel,
-                text=f":shipitparrot: Watching for new ships! Polling every {int(poll_interval)}s",
+                text=f"I am alive..",
             )
         except Exception:
             logger.exception("Failed to send online announcement")
