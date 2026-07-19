@@ -28,7 +28,9 @@ clanker-v2/
 ├── AGENTS.md           ← you are here
 ├── AI/                 ← agent brain: context, journal, notes (see AI/README.md)
 ├── sw-reviewer/        ← v1 source, REFERENCE ONLY (own git repo, gitignored here)
-└── (v2 source goes here — not started yet)
+├── pyproject.toml      ← v2 Python package (uv-managed)
+├── src/clanker/        ← v2 source: config, shipwrights API client, watcher, CLI
+└── tests/              ← pytest suite (in-memory fake dashboard, no network)
 ```
 
 ## Key facts
