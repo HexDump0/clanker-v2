@@ -101,20 +101,28 @@ def test_review_instructions_reference_real_tools():
     assert "review_generate_pdf" not in text
 
 
-def test_provider_pin_only_for_openrouter():
-    base = dict(shipwrights_session="x", openrouter_api_key="k", hackclub_api_key="h")
-    pinned = build_model_settings(
-        Settings(**base, openrouter_provider_only="alibaba, cerebras")
+def make_settings(**overrides) -> Settings:
+    # _env_file=None keeps the developer's real .env out of the test.
+    return Settings(
+        _env_file=None,
+        shipwrights_session="x",
+        openrouter_api_key="k",
+        hackclub_api_key="h",
+        **overrides,
     )
+
+
+def test_provider_pin_only_for_openrouter():
+    pinned = build_model_settings(make_settings(openrouter_provider_only="alibaba, cerebras"))
     assert pinned["openrouter_provider"] == {
         "only": ["alibaba", "cerebras"],
         "allow_fallbacks": False,
     }
 
-    unpinned = build_model_settings(Settings(**base))
+    unpinned = build_model_settings(make_settings())
     assert "openrouter_provider" not in unpinned
 
     hackclub = build_model_settings(
-        Settings(**base, ai_provider="hackclub", openrouter_provider_only="alibaba")
+        make_settings(ai_provider="hackclub", openrouter_provider_only="alibaba")
     )
     assert "openrouter_provider" not in hackclub
