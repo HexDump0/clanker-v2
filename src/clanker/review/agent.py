@@ -11,7 +11,7 @@ Two agents share the same model and toolset:
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 from pydantic_ai import Agent, PromptedOutput
@@ -94,10 +94,20 @@ def create_chat_agent(
     settings: Settings,
     tools: ReviewTools,
     extra_tools: list[Callable] | None = None,
+    memory_provider: Callable[[], Awaitable[str]] | None = None,
 ) -> Agent:
-    return Agent(
+    agent = Agent(
         build_model(settings),
         instructions=build_chat_instructions(),
         model_settings=build_model_settings(settings),
         tools=tools.all() + list(extra_tools or []),
     )
+    if memory_provider is not None:
+        # Dynamic instruction: re-read the persistent memory on every run so
+        # newly remembered facts show up immediately. Chat-only — the review
+        # agent has no memory instruction and is unaffected.
+        @agent.instructions
+        async def _memory_block() -> str:
+            return await memory_provider()
+
+    return agent

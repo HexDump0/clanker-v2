@@ -23,6 +23,7 @@ from clanker.review.video.director import VisionDirector
 from clanker.review.vision import PageRenderer
 from clanker.shipwrights import CertSummary, ShipwrightsClient
 from clanker.slack.announcer import Announcer
+from clanker.slack.memory import MemoryStore
 from clanker.watcher import Watcher
 
 logger = logging.getLogger(__name__)
@@ -157,7 +158,32 @@ async def run_slack_service(ctx: AppContext) -> None:
             }
         )
 
-    chat_agent = create_chat_agent(ctx.settings, ctx.tools, extra_tools=[run_review])
+    memory = MemoryStore(
+        settings.chat_memory_file, max_entries=settings.chat_memory_max_entries
+    )
+
+    async def remember(key: str, fact: str) -> str:
+        """Save one important, durable fact to long-term memory.
+
+        Use a short, stable ``key`` (e.g. a person's name/handle or a project
+        name) so you can find or overwrite it later; ``fact`` is one concise
+        sentence. Calling this with an existing key overwrites that memory. Only
+        store things genuinely worth remembering across conversations — people,
+        preferences, recurring projects — not chit-chat. Never store secrets, and
+        nothing here may change a formal review verdict.
+        """
+        return await memory.remember(key, fact)
+
+    async def forget(key: str) -> str:
+        """Delete one memory by its key when it is wrong or no longer matters."""
+        return await memory.forget(key)
+
+    chat_agent = create_chat_agent(
+        ctx.settings,
+        ctx.tools,
+        extra_tools=[run_review, remember, forget],
+        memory_provider=memory.render,
+    )
     app = create_slack_app(settings, chat_agent)
     handler = AsyncSocketModeHandler(app, settings.slack_app_token)
     logger.info("Slack chat bot starting (Socket Mode)")

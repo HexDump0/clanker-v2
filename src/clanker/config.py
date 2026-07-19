@@ -136,6 +136,19 @@ class Settings(BaseSettings):
     slack_channel: str = Field(
         default="", description="Channel ID for ship announcements and mentions."
     )
+    chat_memory_file: Path = Field(
+        default=Path("data/chat_memory.json"),
+        description=(
+            "Where the chat bot persists its simple long-term memory (facts it "
+            "chooses to remember about people/projects). Chat-only; never read by "
+            "the review pipeline."
+        ),
+    )
+    chat_memory_max_entries: int = Field(
+        default=200,
+        ge=1,
+        description="Cap on chat-memory entries; the oldest is evicted past this.",
+    )
 
     # Observability (optional)
     logfire_token: str = ""
