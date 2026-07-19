@@ -117,6 +117,10 @@ links (ngrok, cloudflared, DuckDNS), zips of source, raw source files (`.py`,
 - Repo contents: `review_get_github_repo_tree`, `review_get_github_file_content`,
   `review_get_github_releases` (for CLI/desktop: do releases contain real binaries?).
 - Demo: `review_check_url`, then `review_fetch_page_text` to read the page.
+- Unknown hosting platform (demo host you don't recognize and can't classify from the
+  page itself): one `review_web_search` to find out what it is (free tier that
+  sleeps? tunnel service?) before judging `demo_validity` / `demo_link_type`. This is
+  the tool's only routine use — see its restrictions in the tool list.
 - Secrets scan: `review_get_github_repo_tree` for suspicious files, then
   `review_get_github_file_content` (or `review_search_github_code`).
 - AI declaration / update flag: `ai_declaration` and `updated_project` fields in the

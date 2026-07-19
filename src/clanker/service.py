@@ -48,6 +48,7 @@ def build_app(settings: Settings, *, with_slack: bool = True) -> AppContext:
         github_token=settings.github_token,
         stardance_session=settings.stardance_session,
         renderer=renderer,
+        hackclub_ai_key=settings.hackclub_api_key,
     )
     review_agent = create_review_agent(settings, tools)
     runner = ReviewRunner(agent=review_agent, client=client, settings=settings, tools=tools)

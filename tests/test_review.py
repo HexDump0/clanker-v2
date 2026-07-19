@@ -324,3 +324,51 @@ async def test_review_agent_uses_prompted_output_and_keeps_tools_optional():
     assert {tool.name for tool in request.function_tools} == {
         tool.__name__ for tool in tools.all()
     }
+
+
+async def test_web_search_requires_key():
+    tools = ReviewTools()
+    payload = json.loads(await tools.review_web_search("what is somehost.io"))
+    assert payload["ok"] is False
+    assert "not available" in payload["error"]
+    await tools.aclose()
+
+
+async def test_web_search_returns_trimmed_results():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url == "https://ai.hackclub.com/proxy/v1/exa/search"
+        assert request.headers["authorization"] == "Bearer hc-key"
+        body = json.loads(request.content)
+        assert body["query"] == "is somehost.io a tunnel service"
+        assert body["numResults"] == 3
+        return httpx.Response(
+            200,
+            json={
+                "results": [
+                    {
+                        "title": "Somehost docs",
+                        "url": "https://somehost.io/docs",
+                        "publishedDate": "2026-01-01",
+                        "text": "Somehost tunnels local ports to public URLs.",
+                        "id": "ignored",
+                    }
+                ],
+                "costDollars": {"total": 0.005},
+            },
+        )
+
+    tools = ReviewTools(hackclub_ai_key="hc-key")
+    tools._web = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    payload = json.loads(
+        await tools.review_web_search("is somehost.io a tunnel service", num_results=3)
+    )
+    assert payload["ok"] is True
+    assert payload["results"] == [
+        {
+            "title": "Somehost docs",
+            "url": "https://somehost.io/docs",
+            "published_date": "2026-01-01",
+            "snippet": "Somehost tunnels local ports to public URLs.",
+        }
+    ]
+    await tools.aclose()
