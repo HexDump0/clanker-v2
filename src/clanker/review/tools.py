@@ -37,6 +37,7 @@ _URL_FLAGS = {
     "drive.google.com": "google_drive",
     "colab.research.google.com": "colab",
     "huggingface.co": "huggingface",
+    "kaggle.com": "kaggle",
     ".onrender.com": "render",
     ".up.railway.app": "railway",
     "ngrok": "ngrok",
@@ -504,7 +505,7 @@ class ReviewTools:
         """Check if a URL is reachable: status code, final URL, content type.
 
         Also flags problematic platforms (google_drive, colab, huggingface,
-        render, railway, ngrok, localhost). Does NOT return page content.
+        kaggle, render, railway, ngrok, localhost). Does NOT return page content.
         If you are going to read the page anyway, call review_fetch_page_text
         directly — it reports the same reachability info alongside the text.
         """

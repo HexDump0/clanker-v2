@@ -24,8 +24,9 @@ The repo link must point to the repo root, not a specific file or subdirectory.
 - **fail**: points at a file, blob, or unrelated page
 
 ### 4. pre_event_commits
-Check commit history for activity before **December 25, 2024** (the event cutoff —
-older projects must be declared as updates).
+Check commit history for activity before **June 1, 2026** (the event cutoff —
+projects started before Stardance, or previously submitted to another YSWS, must be
+declared as updates).
 - **pass**: no commits before the cutoff, OR commits exist AND the submission is
   declared as an update (check the `updated_project` field in the packet and the
   description for an "UPDATED PROJECT" mention)
@@ -41,12 +42,15 @@ detected, check the `ai_declaration` field in the packet.
 - **fail**: AI signals detected but no AI declaration
 
 ### 6. commit_authorship
-Check commits for suspicious patterns: no commits at all; all commits by someone other
-than the submitter; a single "Initial commit" containing the whole project; submitter
-has zero code contributions.
-- **pass**: normal history with meaningful contributions by the submitter
-- **warn**: suspicious patterns (most code by others, single large commit)
-- **fail**: no commits, or zero submitter contributions
+Check the commit history for suspicious patterns: no commits at all, or a single
+"Initial commit" dump containing the whole project (no incremental development).
+Do NOT compare commit author names/emails against the submitter's identity — git
+identities frequently differ from dashboard usernames (different emails, machine
+configs, noreply addresses) and this produces too many false positives.
+- **pass**: history shows incremental development
+- **warn**: single large commit containing the whole project, or history that
+  otherwise doesn't reflect real development
+- **fail**: no commits at all
 
 ### 7. readme_boilerplate
 Scan the README for boilerplate/placeholder content: generic placeholders
@@ -87,6 +91,9 @@ credentials", "username: … password: …" patterns.
 - **pass**: no premade credentials required
 - **fail**: demo requires shared/premade login details
 - **skip**: project has no authentication at all
+- Exception: for API projects, documented test credentials / demo API keys for trying
+  endpoints are acceptable (the API guide even recommends them) — this rule targets
+  user-account login flows.
 
 ### 12. description_accuracy
 Compare features claimed in the description/README against what exists in the
@@ -97,8 +104,9 @@ code/demo.
 
 ### 13. demo_link_type
 Universal link rules, independent of project type: Google Drive, Google Colab,
-Hugging Face, Render/Railway free tier (for web apps), zips of source, raw source
-files (`.py`, `.js`) are all rejected.
+Kaggle notebooks, Hugging Face, Render/Railway free tier (for web apps), tunnel
+links (ngrok, cloudflared, DuckDNS), zips of source, raw source files (`.py`,
+`.js`) are all rejected.
 - **pass**: not on any rejected platform/format
 - **fail**: uses a universally rejected platform/format
 

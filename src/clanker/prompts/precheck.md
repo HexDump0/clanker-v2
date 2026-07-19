@@ -46,7 +46,7 @@ items below in this stage — nothing else.
 
 6. **Demo URL early screening** (flag): record matches against problematic patterns
    (`review_check_url` flags these automatically): Google Drive, Google Colab,
-   Hugging Face, `*.onrender.com`, `*.up.railway.app`, ngrok, localhost.
+   Hugging Face, Kaggle, `*.onrender.com`, `*.up.railway.app`, ngrok, localhost.
 
 ## Instant reject conditions
 
