@@ -71,16 +71,23 @@ def create_review_agent(settings: Settings, tools: ReviewTools) -> Agent[None, R
     )
 
 
-CHAT_EXTRA_INSTRUCTIONS = """
-# Chat mode
+def build_chat_instructions() -> str:
+    """Instructions for the @-mention chat bot.
 
-You are talking to Shipwright reviewers in Slack. Answer questions, investigate
-projects with your tools, and be concise — this is a chat, not a report.
-
-To run a complete formal review of a cert, call the `run_review` tool with the cert
-id; it executes the whole pipeline (all stages, PDF report) and returns the verdict.
-Don't simulate the pipeline by hand in chat.
-"""
+    Starts with the Clanker personality prompt, then appends the reviewer rubric,
+    pre-check gates, and demo guidelines as *reference* knowledge so the chat bot
+    can answer questions about what is and isn't allowed. It does NOT get the
+    stage-by-stage "perform a review" framing — formal reviews run through the
+    separate review agent via the injected ``run_review`` tool.
+    """
+    return "\n\n".join(
+        [
+            _prompt("chat.md"),
+            "## The rubric (checks)\n\n" + _prompt("checks.md"),
+            "## Pre-check gates (instant-reject conditions)\n\n" + _prompt("precheck.md"),
+            "## Demo guidelines\n\n" + _prompt("demo_guidelines.md"),
+        ]
+    )
 
 
 def create_chat_agent(
@@ -90,7 +97,7 @@ def create_chat_agent(
 ) -> Agent:
     return Agent(
         build_model(settings),
-        instructions=build_review_instructions() + CHAT_EXTRA_INSTRUCTIONS,
+        instructions=build_chat_instructions(),
         model_settings=build_model_settings(settings),
         tools=tools.all() + list(extra_tools or []),
     )
