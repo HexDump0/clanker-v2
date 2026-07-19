@@ -1,0 +1,46 @@
+{
+  "project_name": "ferrocompiler",
+  "project_author": "@idident",
+  "verdict": "REJECT",
+  "headline": "Why this review was rejected",
+  "summary": "The submitted repository is not publicly accessible, so the project cannot be reviewed.",
+  "scenes": [
+    {
+      "id": "submitted-repository-404",
+      "url": "https://github.com/idident/ferrocompiler",
+      "target": {
+        "kind": "selector",
+        "value": "img[alt^=\"404\"]"
+      },
+      "eyebrow": "PRIMARY EVIDENCE · REPOSITORY ACCESSIBILITY",
+      "title": "The submitted repository returns 404",
+      "body": "Clanker cannot inspect the code, commits, releases, or README until this exact URL is publicly accessible.",
+      "fix": "Make the repository public, then verify this URL.",
+      "duration_seconds": 5.8,
+      "callout_side": "right"
+    },
+    {
+      "id": "github-search-zero-results",
+      "url": "https://github.com/search?q=ferrocompiler&type=repositories",
+      "target": {
+        "kind": "text",
+        "value": "Your search did not match any repositories"
+      },
+      "eyebrow": "CORROBORATING EVIDENCE · PUBLIC SEARCH",
+      "title": "No public repository matches the project name",
+      "body": "A GitHub repository search for “ferrocompiler” returns zero results. This supports the accessibility failure; it is not a separate rejection reason.",
+      "fix": "Confirm the submitted owner and repository name.",
+      "duration_seconds": 5.5,
+      "callout_side": "left"
+    }
+  ],
+  "required_fixes": [
+    "Ensure the GitHub repository exists and is public.",
+    "Verify the submitted URL matches the actual repository."
+  ],
+  "timing": {
+    "intro_seconds": 2.4,
+    "outro_seconds": 3.5,
+    "crossfade_seconds": 0.18
+  }
+}
