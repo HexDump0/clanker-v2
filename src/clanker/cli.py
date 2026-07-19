@@ -1,8 +1,10 @@
 """Command-line entry points.
 
-    clanker queue            one-shot look at the pending queue
-    clanker show <cert-id>   full detail for one cert
-    clanker watch            run the watcher (logs new certs; no review yet)
+    clanker queue             one-shot look at the pending queue
+    clanker show <cert-id>    full detail for one cert
+    clanker watch             run the watcher only (logs new certs, no reviews)
+    clanker review <cert-id>  run one full review (verdict + PDF, no Slack)
+    clanker run               run everything: watcher + reviews + Slack
 """
 
 from __future__ import annotations
@@ -57,6 +59,40 @@ async def cmd_watch(settings: Settings, args: argparse.Namespace) -> None:
         await watcher.run(announce)
 
 
+async def cmd_review(settings: Settings, args: argparse.Namespace) -> None:
+    from clanker.config import configure_observability
+    from clanker.service import build_app
+
+    configure_observability(settings)
+    ctx = build_app(settings, with_slack=False)
+    try:
+        outcome = await ctx.runner.review_cert(args.cert_id)
+    finally:
+        await ctx.client.close()
+        await ctx.tools.aclose()
+
+    review = outcome.review
+    print(f"\nVerdict: {review.verdict.value}  ({review.project_type})")
+    print(f"Reasoning: {review.reasoning}")
+    if review.required_fixes:
+        print("Required fixes:")
+        for fix in review.required_fixes:
+            print(f"  - {fix}")
+    if review.special_flags:
+        print(f"Flags: {', '.join(review.special_flags)}")
+    print("Checks:")
+    for row in review.checks.as_pdf_rows():
+        print(f"  [{row['status']:>4}] {row['name']}: {row['details']}")
+    print(f"\nPDF: {outcome.pdf_path or '(generation failed)'}")
+    print(f"Tokens: {outcome.input_tokens} in / {outcome.output_tokens} out")
+
+
+async def cmd_run(settings: Settings, args: argparse.Namespace) -> None:
+    from clanker.service import run_all
+
+    await run_all(settings)
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="clanker", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -73,6 +109,13 @@ def main(argv: list[str] | None = None) -> None:
     p_watch = sub.add_parser("watch", help="watch for new pending certs")
     p_watch.add_argument("--interval", type=float, default=None, help="poll interval seconds")
     p_watch.set_defaults(func=cmd_watch)
+
+    p_review = sub.add_parser("review", help="run one full review (no Slack)")
+    p_review.add_argument("cert_id")
+    p_review.set_defaults(func=cmd_review)
+
+    p_run = sub.add_parser("run", help="run all services (watcher + reviews + Slack)")
+    p_run.set_defaults(func=cmd_run)
 
     args = parser.parse_args(argv)
     logging.basicConfig(

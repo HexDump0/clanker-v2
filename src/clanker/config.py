@@ -8,9 +8,12 @@ Loaded from the environment and an optional ``.env`` file at the repo root.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+HACKCLUB_AI_BASE_URL = "https://ai.hackclub.com/proxy/v1"
 
 
 class Settings(BaseSettings):
@@ -39,6 +42,46 @@ class Settings(BaseSettings):
         ),
     )
 
+    # AI model (review agent)
+    ai_provider: Literal["openrouter", "hackclub"] = "openrouter"
+    openrouter_api_key: str = ""
+    hackclub_api_key: str = ""
+    model_name: str = "xiaomi/mimo-v2.5-pro"
+    openrouter_provider_only: str = Field(
+        default="",
+        description=(
+            "Comma-separated OpenRouter provider slugs to pin routing to "
+            "(e.g. 'alibaba'). Empty = let OpenRouter route freely. "
+            "Only honored when ai_provider=openrouter."
+        ),
+    )
+    openrouter_allow_fallbacks: bool = Field(
+        default=False,
+        description="With a provider pin, whether OpenRouter may fall back to others.",
+    )
+    reasoning_effort: Literal["low", "medium", "high"] = "medium"
+    agent_timeout: float = 120.0
+
+    # Reviews
+    max_concurrent_reviews: int = Field(default=2, ge=1)
+    pdf_dir: Path = Path("data/pdfs")
+    github_token: str = Field(
+        default="", description="Optional; raises GitHub API rate limits for review tools."
+    )
+
+    # Slack
+    slack_bot_token: str = ""
+    slack_app_token: str = Field(
+        default="", description="App-level token for Socket Mode (chat bot)."
+    )
+    slack_channel: str = Field(
+        default="", description="Channel ID for ship announcements and mentions."
+    )
+
+    # Observability (optional)
+    logfire_token: str = ""
+    logfire_service_name: str = "clanker"
+
     def require_session(self) -> str:
         if not self.shipwrights_session:
             raise RuntimeError(
@@ -47,6 +90,37 @@ class Settings(BaseSettings):
             )
         return self.shipwrights_session
 
+    def require_ai_key(self) -> str:
+        key = self.hackclub_api_key if self.ai_provider == "hackclub" else self.openrouter_api_key
+        if not key:
+            name = "HACKCLUB_API_KEY" if self.ai_provider == "hackclub" else "OPENROUTER_API_KEY"
+            raise RuntimeError(f"{name} is not set (AI_PROVIDER={self.ai_provider})")
+        return key
+
+    def require_slack(self) -> str:
+        if not self.slack_bot_token:
+            raise RuntimeError("SLACK_BOT_TOKEN is not set")
+        if not self.slack_channel:
+            raise RuntimeError("SLACK_CHANNEL is not set")
+        return self.slack_bot_token
+
+    @property
+    def provider_pins(self) -> list[str]:
+        return [p.strip() for p in self.openrouter_provider_only.split(",") if p.strip()]
+
 
 def load_settings() -> Settings:
     return Settings()
+
+
+def configure_observability(settings: Settings) -> None:
+    """Set up logfire if available/configured; a no-op otherwise."""
+    import logfire
+
+    logfire.configure(
+        service_name=settings.logfire_service_name,
+        send_to_logfire="if-token-present",
+        token=settings.logfire_token or None,
+    )
+    logfire.instrument_pydantic_ai()
+    logfire.instrument_httpx()

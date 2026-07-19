@@ -4,9 +4,14 @@ version = "0.1.0"
 description = "clanker v2 — AI-assisted review bot for Hack Club Shipwrights certifications"
 requires-python = ">=3.13"
 dependencies = [
+    "aiohttp>=3.14.1",
     "httpx>=0.28",
+    "logfire>=3",
+    "openai>=1.60",
     "pydantic>=2.10",
+    "pydantic-ai>=1.107",
     "pydantic-settings>=2.7",
+    "slack-bolt>=1.23",
 ]
 
 [project.scripts]
@@ -36,3 +41,6 @@ target-version = "py313"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "ASYNC"]
+# ASYNC240: flags one-shot Path.is_file/unlink calls in async code; the blocking
+# time is microseconds and we don't want an anyio dependency for it.
+ignore = ["ASYNC240"]
