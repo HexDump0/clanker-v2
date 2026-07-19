@@ -9,7 +9,7 @@ dependencies = [
     "logfire>=3",
     "openai>=1.60",
     "pydantic>=2.10",
-    "pydantic-ai>=1.107",
+    "pydantic-ai>=2.13,<3",
     "pydantic-settings>=2.7",
     "slack-bolt>=1.23",
 ]

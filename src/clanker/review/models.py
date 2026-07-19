@@ -1,8 +1,8 @@
 """Structured output models for the review agent.
 
 Unlike v1 (where equivalent models existed but were never wired up), the agent
-runs with ``output_type=ReviewOutput`` — the verdict is validated data, never
-scraped out of the message log.
+uses ``PromptedOutput(ReviewOutput)`` — the verdict is validated data, never
+scraped out of the message log or represented as a forced output-tool call.
 """
 
 from __future__ import annotations

@@ -3,9 +3,14 @@ from __future__ import annotations
 import shutil
 
 import pytest
+from pydantic_ai.models.test import TestModel
 
 from clanker.config import Settings
-from clanker.review.agent import build_model_settings, build_review_instructions
+from clanker.review.agent import (
+    build_model_settings,
+    build_review_instructions,
+    create_review_agent,
+)
 from clanker.review.models import (
     CheckResult,
     ChecksResult,
@@ -15,6 +20,7 @@ from clanker.review.models import (
 )
 from clanker.review.packet import build_packet
 from clanker.review.pdf import generate_review_pdf
+from clanker.review.tools import ReviewTools
 from tests.conftest import make_cert
 
 
@@ -92,8 +98,6 @@ def test_review_instructions_reference_real_tools():
     # every tool named in the prompts must exist on the toolset (v1 pain point #11)
     import re
 
-    from clanker.review.tools import ReviewTools
-
     tools = ReviewTools()
     tool_names = {fn.__name__ for fn in tools.all()}
     referenced = set(re.findall(r"review_[a-z_]+", text))
@@ -126,3 +130,20 @@ def test_provider_pin_only_for_openrouter():
         make_settings(ai_provider="hackclub", openrouter_provider_only="alibaba")
     )
     assert "openrouter_provider" not in hackclub
+
+
+async def test_review_agent_uses_prompted_output_and_keeps_tools_optional():
+    tools = ReviewTools()
+    agent = create_review_agent(make_settings(), tools)
+    model = TestModel(custom_output_text=make_review().model_dump_json())
+
+    result = await agent.run("Review this project", model=model)
+
+    assert result.output == make_review()
+    request = model.last_model_request_parameters
+    assert request is not None
+    assert request.output_mode == "prompted"
+    assert request.output_tools == []
+    assert {tool.name for tool in request.function_tools} == {
+        tool.__name__ for tool in tools.all()
+    }

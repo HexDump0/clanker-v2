@@ -3,8 +3,8 @@
 Two agents share the same model and toolset:
 
 - the **review agent** runs one cert review and must return a validated
-  ``ReviewOutput`` (``output_type`` — no message-log scraping, no prompt-pleading
-  for a PDF tool call);
+  ``ReviewOutput`` via prompted JSON (no forced output-tool call, message-log
+  scraping, or prompt-pleading for a PDF tool call);
 - the **chat agent** answers Slack mentions in plain markdown and can trigger
   full reviews through an injected tool.
 """
@@ -15,7 +15,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from openai import AsyncOpenAI
-from pydantic_ai import Agent
+from pydantic_ai import Agent, PromptedOutput
 from pydantic_ai.models.openrouter import OpenRouterModel, OpenRouterModelSettings
 from pydantic_ai.providers.openrouter import OpenRouterProvider
 
@@ -70,7 +70,11 @@ def build_model_settings(settings: Settings) -> OpenRouterModelSettings:
 def create_review_agent(settings: Settings, tools: ReviewTools) -> Agent[None, ReviewOutput]:
     return Agent(
         build_model(settings),
-        output_type=ReviewOutput,
+        # A bare Pydantic model uses tool output by default. That makes
+        # pydantic-ai force `tool_choice=required`, which Alibaba rejects when
+        # reasoning/thinking is enabled. Prompted output keeps ordinary review
+        # tools optional while retaining Pydantic validation and retries.
+        output_type=PromptedOutput(ReviewOutput),
         instructions=build_review_instructions(),
         model_settings=build_model_settings(settings),
         tools=tools.all(),

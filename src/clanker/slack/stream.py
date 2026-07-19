@@ -16,7 +16,7 @@ from pydantic_ai import (
     PartStartEvent,
     TextPartDelta,
 )
-from pydantic_ai.messages import ModelMessage, TextPart
+from pydantic_ai.messages import ModelMessage, TextPart, ToolReturnPart
 from slack_sdk.errors import SlackApiError
 from slack_sdk.models.messages.chunk import TaskUpdateChunk
 
@@ -164,20 +164,23 @@ async def run_agent_streaming(
 
                 elif isinstance(event, FunctionToolResultEvent):
                     await flush_text()
-                    result_part = event.result
+                    result_part = event.part
                     tool_name = getattr(result_part, "tool_name", None) or "tool"
                     call_id = result_part.tool_call_id or f"tool_{tool_id_counter}"
-                    outcome = getattr(result_part, "outcome", "success")
+                    succeeded = (
+                        isinstance(result_part, ToolReturnPart)
+                        and result_part.outcome == "success"
+                    )
                     await safe_append(
                         chunks=[
                             TaskUpdateChunk(
                                 id=call_id,
                                 title=tool_name,
-                                status="error" if outcome == "failed" else "complete",
+                                status="complete" if succeeded else "error",
                             )
                         ]
                     )
-                    if tool_name in _FILE_RESULT_TOOLS:
+                    if succeeded and tool_name in _FILE_RESULT_TOOLS:
                         await upload_tool_file(tool_name, getattr(result_part, "content", ""))
 
         await flush_text()
