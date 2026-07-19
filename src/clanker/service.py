@@ -72,6 +72,7 @@ def build_app(settings: Settings, *, with_slack: bool = True) -> AppContext:
             channel=settings.slack_channel,
             dashboard_base_url=settings.shipwrights_base_url,
             workplace=settings.shipwrights_workplace,
+            ship_ping=settings.slack_ship_ping,
         )
 
     return AppContext(

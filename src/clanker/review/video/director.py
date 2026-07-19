@@ -26,6 +26,14 @@ You receive trusted review findings and one clean browser screenshot per finding
 one to three non-redundant scenes that most clearly explain the verdict. Prefer one
 primary piece of evidence; use corroborating evidence only when it adds real proof.
 
+Write the summary as one sentence addressed directly to the project's author in the
+second person, opening with the outcome and its reason. Use the verdict from the trusted
+context: for REJECT start with "Your project was rejected because …"; for APPROVE start
+with "Your project was approved because …"; for FLAG_FOR_HUMAN start with "Your project
+needs a human reviewer because …". Keep it factual and specific — no greetings, no
+apologies. The headline stays a short, punchy description of the main issue (not second
+person).
+
 For every chosen scene:
 - reference only an evidence_id supplied to you;
 - write a plain, specific title and one concise factual explanation;

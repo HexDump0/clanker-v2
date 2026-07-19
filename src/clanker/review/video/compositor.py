@@ -7,11 +7,18 @@ import asyncio
 import base64
 import html
 import json
+import logging
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
 from clanker.review.video.models import ComposedScene, VideoPlan, VideoProject
+
+logger = logging.getLogger(__name__)
+
+# Bundled default background track, used when music is enabled but no custom file
+# is configured. Swap it out via VIDEO_MUSIC_FILE.
+DEFAULT_MUSIC = Path(__file__).resolve().parent / "assets" / "chill.mp3"
 
 VIEWPORT = {"width": 1280, "height": 720}
 INTRO_SECONDS = 3.0
@@ -128,7 +135,7 @@ body {{ font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-
 .outro li:last-child {{ border-bottom:1px solid #353538; }}
 .outro li span {{ color:#ec3750; font-size:12px; font-weight:800; padding-top:6px; }}
 </style></head><body>
-<section class="scene intro"><div class="intro-inner"><div class="kicker">SW-CLANKER REVIEW</div><h1>{html.escape(plan.headline)}</h1><div class="meta"><strong>{html.escape(project.project_name)}</strong><span>{html.escape(project.project_author)}</span><span class="verdict">{html.escape(project.verdict)}</span></div><div class="summary">{html.escape(plan.summary)}</div></div></section>
+<section class="scene intro"><div class="intro-inner"><h1>{html.escape(plan.headline)}</h1><div class="meta"><strong>{html.escape(project.project_name)}</strong><span>{html.escape(project.project_author)}</span><span class="verdict">{html.escape(project.verdict)}</span></div><div class="summary">{html.escape(plan.summary)}</div></div></section>
 {"".join(scene_html)}
 <section class="scene outro"><div class="outro-inner"><div><div class="kicker">Before resubmitting</div><h2>Required<br>fixes.</h2></div><ul>{fixes}</ul></div></section>
 <script>
@@ -149,8 +156,37 @@ function frame(now) {{ const t=(now-started)/1000; for (const item of timeline) 
     return document, total
 
 
-async def render_composition(document: str, duration: float, output_path: Path) -> RenderedVideo:
+def _ffmpeg_args(webm: Path, duration: float, output_path: Path, music: Path | None) -> list[str]:
+    """Encode args; mixes a looped, faded, low-volume music track when supplied."""
+    args = ["ffmpeg", "-y", "-v", "error", "-i", str(webm)]
+    if music:
+        args += ["-stream_loop", "-1", "-i", str(music)]
+    args += ["-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p", "-r", "30"]
+    if music:
+        fade_out_start = max(0.0, duration - 2.5)
+        args += [
+            "-filter_complex",
+            f"[1:a]volume=0.7,afade=t=in:st=0:d=1.5,"
+            f"afade=t=out:st={fade_out_start:.3f}:d=2.5[a]",
+            "-map", "0:v", "-map", "[a]",
+            "-c:a", "aac", "-b:a", "128k", "-shortest",
+        ]
+    else:
+        args += ["-an"]
+    args += ["-t", f"{duration:.3f}", "-movflags", "+faststart", str(output_path)]
+    return args
+
+
+async def render_composition(
+    document: str,
+    duration: float,
+    output_path: Path,
+    music_path: Path | None = None,
+) -> RenderedVideo:
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    music = music_path if (music_path and music_path.is_file()) else None
+    if music_path and not music:
+        logger.warning("Video music file not found: %s — rendering silent", music_path)
     with tempfile.TemporaryDirectory(prefix="clanker-video-compose-") as tmp:
         webm = Path(tmp) / "capture.webm"
         try:
@@ -158,10 +194,13 @@ async def render_composition(document: str, duration: float, output_path: Path) 
         except ImportError:
             raise CompositionError("playwright is not installed") from None
         async with async_playwright() as playwright:
+            launch_args = ["--no-sandbox", "--disable-dev-shm-usage"]
             try:
-                browser = await playwright.chromium.launch(headless=True, channel="chromium")
+                browser = await playwright.chromium.launch(
+                    headless=True, channel="chromium", args=launch_args
+                )
             except Exception:
-                browser = await playwright.chromium.launch(headless=True)
+                browser = await playwright.chromium.launch(headless=True, args=launch_args)
             try:
                 context = await browser.new_context(viewport=VIEWPORT, screen=VIEWPORT)
                 page = await context.new_page()
@@ -174,10 +213,7 @@ async def render_composition(document: str, duration: float, output_path: Path) 
                 await browser.close()
 
         process = await asyncio.create_subprocess_exec(
-            "ffmpeg", "-y", "-v", "error", "-i", str(webm),
-            "-c:v", "libx264", "-preset", "medium", "-crf", "20",
-            "-pix_fmt", "yuv420p", "-r", "30", "-t", f"{duration:.3f}",
-            "-movflags", "+faststart", "-an", str(output_path),
+            *_ffmpeg_args(webm, duration, output_path, music),
             stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,
         )
         try:

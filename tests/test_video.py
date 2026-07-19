@@ -281,7 +281,7 @@ async def test_pipeline_records_missing_text_fallback(monkeypatch, tmp_path):
     async def fake_capture(*args, **kwargs):
         return capture
 
-    async def fake_render(document, duration, output_path):
+    async def fake_render(document, duration, output_path, music_path=None):
         output_path.write_bytes(b"mp4")
         return RenderedVideo(output_path, duration, 3)
 

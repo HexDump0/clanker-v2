@@ -41,7 +41,9 @@ async def render_page(url: str, *, load_timeout: float = 20.0) -> RenderResult:
 
     try:
         async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
+            browser = await p.chromium.launch(
+                headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"]
+            )
             try:
                 context = await browser.new_context(viewport=VIEWPORT, accept_downloads=False)
                 context.set_default_timeout(load_timeout * 1000)

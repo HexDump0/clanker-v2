@@ -2,9 +2,9 @@ FROM python:3.13-slim
 
 WORKDIR /app
 
-# Typst (PDF reports) + fonts for the report template
+# Typst (PDF reports) + ffmpeg (review-video encoding) + fonts for the templates
 RUN apt-get update && apt-get install -y --no-install-recommends curl xz-utils \
-        fonts-noto-core fonts-liberation fonts-dejavu-core && \
+        ffmpeg fonts-noto-core fonts-liberation fonts-dejavu-core && \
     curl -fsSL https://github.com/typst/typst/releases/download/v0.15.0/typst-x86_64-unknown-linux-musl.tar.xz \
     | tar -xJ -C /tmp && \
     mv /tmp/typst-x86_64-unknown-linux-musl/typst /usr/local/bin/typst && \
@@ -25,8 +25,12 @@ RUN uv sync --frozen --no-dev
 RUN uv run --no-sync playwright install --with-deps chromium && \
     rm -rf /var/lib/apt/lists/*
 
-# Watcher state + generated PDFs persist here (mount a volume)
+# Runtime state (watcher_state.json, chat_memory.json, generated PDFs/videos) lives
+# here. Declaring it a volume keeps the data across container restarts; for durable
+# persistence across redeploys, mount a named volume at /app/data (in Coolify: add a
+# Persistent Storage entry with mount path /app/data).
 RUN mkdir -p /app/data/pdfs
+VOLUME ["/app/data"]
 
 ENV PYTHONUNBUFFERED=1
 CMD ["uv", "run", "--no-sync", "clanker", "run"]

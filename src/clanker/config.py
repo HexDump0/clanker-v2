@@ -112,6 +112,18 @@ class Settings(BaseSettings):
     )
     video_dir: Path = Path("data/videos")
     video_work_dir: Path = Path("data/video-runs")
+    video_music_enabled: bool = Field(
+        default=True,
+        description="Mix a chill background track into review videos.",
+    )
+    video_music_file: Path | None = Field(
+        default=None,
+        description=(
+            "Path to a background music file (looped, faded, mixed low) for review "
+            "videos. Empty = use the bundled default track. Swap in any royalty-free "
+            "track here. Ignored when VIDEO_MUSIC_ENABLED is false."
+        ),
+    )
     video_timeout: float = Field(
         default=240.0,
         ge=30.0,
@@ -135,6 +147,14 @@ class Settings(BaseSettings):
     )
     slack_channel: str = Field(
         default="", description="Channel ID for ship announcements and mentions."
+    )
+    slack_ship_ping: str = Field(
+        default="",
+        description=(
+            "Who to 'cc' on new-ship announcements. A usergroup id (starts with "
+            "'S') renders as a group ping, a user id ('U'/'W') as a user ping; any "
+            "other value is shown as literal text. Empty = no cc line."
+        ),
     )
     chat_memory_file: Path = Field(
         default=Path("data/chat_memory.json"),

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from unittest.mock import AsyncMock
 
@@ -46,9 +47,11 @@ async def test_announce_ship_posts_parent_and_thread():
     ts = await announcer.announce_ship(cert)
     assert ts == "111.222"
     assert slack.chat_postMessage.call_count == 2
-    parent_text = slack.chat_postMessage.call_args_list[0].kwargs["text"]
-    assert "Project c1" in parent_text
-    assert "ds.shipwrights.dev/stardance/certifications/c1" in parent_text
+    parent = slack.chat_postMessage.call_args_list[0].kwargs
+    attachment_blob = json.dumps(parent["attachments"])
+    assert "Project c1" in attachment_blob
+    assert "ds.shipwrights.dev/stardance/certifications/c1" in attachment_blob
+    assert "AUTOMATING" in attachment_blob  # status badge while the review runs
 
 
 async def test_post_outcome_updates_parent_and_uploads_pdf(tmp_path):
@@ -62,8 +65,8 @@ async def test_post_outcome_updates_parent_and_uploads_pdf(tmp_path):
         outcome_for(cert, pdf=pdf, verdict=ReviewVerdict.REJECT, special_flags=["AI UNDISCLOSED"]),
         parent_ts="111.222",
     )
-    updated = slack.chat_update.call_args.kwargs["text"]
-    assert "*REJECT*" in updated
+    updated = json.dumps(slack.chat_update.call_args.kwargs["attachments"])
+    assert "`REJECT`" in updated  # status badge switched to the verdict
     assert "AI UNDISCLOSED" in updated
     slack.files_upload_v2.assert_awaited_once()
     assert slack.files_upload_v2.call_args.kwargs["thread_ts"] == "111.222"

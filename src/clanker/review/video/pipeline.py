@@ -47,6 +47,7 @@ async def generate_review_video(
     work_dir: Path,
     output_path: Path,
     capture_policy: CapturePolicy = DEFAULT_CAPTURE_POLICY,
+    music_path: Path | None = None,
 ) -> VideoGenerationResult:
     """Capture, direct once, resolve strictly, and render.
 
@@ -164,7 +165,7 @@ async def generate_review_video(
 
     document, duration = build_composition(project, plan, scenes)
     started = time.perf_counter()
-    video = await render_composition(document, duration, output_path)
+    video = await render_composition(document, duration, output_path, music_path=music_path)
     audit.append(
         {
             "stage": "render_and_encode",

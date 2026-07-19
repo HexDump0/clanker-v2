@@ -19,6 +19,7 @@ from clanker.review.models import ReviewOutput
 from clanker.review.packet import ReviewPacket, build_packet
 from clanker.review.pdf import PdfError, generate_review_pdf
 from clanker.review.tools import ReviewTools
+from clanker.review.video.compositor import DEFAULT_MUSIC
 from clanker.review.video.director import Director
 from clanker.review.video.models import VideoProject
 from clanker.review.video.pipeline import generate_review_video
@@ -54,6 +55,12 @@ class ReviewRunner:
         self._settings = settings
         self._tools = tools
         self._video_director = video_director
+
+    def _resolve_video_music(self) -> Path | None:
+        """The music track to mix in: configured file, bundled default, or none."""
+        if not self._settings.video_music_enabled:
+            return None
+        return self._settings.video_music_file or DEFAULT_MUSIC
 
     async def review_cert(self, cert_id: str) -> ReviewOutcome:
         """Run the full pipeline for one cert. Raises on unrecoverable errors."""
@@ -111,6 +118,7 @@ class ReviewRunner:
                         director=self._video_director,
                         work_dir=self._settings.video_work_dir / cert_id,
                         output_path=self._settings.video_dir / f"{cert_id}.mp4",
+                        music_path=self._resolve_video_music(),
                     ),
                     timeout=self._settings.video_timeout,
                 )

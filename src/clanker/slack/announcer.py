@@ -2,11 +2,18 @@
 
 Consumes ``ReviewOutcome`` from the runner — all Slack formatting lives here and
 nowhere else (v1 mixed this into the review orchestration).
+
+The new-ship message is rendered as a Block Kit "embed" (a coloured attachment):
+a header, the project name with a project-type badge and a status badge
+(``AUTOMATING`` while the review runs, then ``APPROVE`` / ``REJECT`` /
+``NEEDS HUMAN``), the description, dev time / submitted date, quick links, and an
+optional cc ping. The status badge's colour drives the attachment's left bar.
 """
 
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 
 from slack_sdk.web.async_client import AsyncWebClient
 
@@ -16,14 +23,24 @@ from clanker.shipwrights import CertSummary
 
 logger = logging.getLogger(__name__)
 
-VERDICT_EMOJI = {
-    ReviewVerdict.APPROVE: ":bread_nod:",
-    ReviewVerdict.REJECT: ":no:",
-    ReviewVerdict.FLAG_FOR_HUMAN: ":aaa:",
+# status label -> (attachment colour, emoji shown with the verdict line)
+_AUTOMATING = "AUTOMATING"
+_STATUS_STYLE = {
+    _AUTOMATING: ("#E2B203", ":robot_face:"),
+    "APPROVE": ("#2EB67D", ":bread_nod:"),
+    "REJECT": ("#E01E5A", ":no:"),
+    "NEEDS HUMAN": ("#8B5CF6", ":aaa:"),
+}
+_DEFAULT_STYLE = ("#8D8D8D", ":grey_question:")
+
+_VERDICT_LABEL = {
+    ReviewVerdict.APPROVE: "APPROVE",
+    ReviewVerdict.REJECT: "REJECT",
+    ReviewVerdict.FLAG_FOR_HUMAN: "NEEDS HUMAN",
 }
 
 
-def _first_sentence(text: str, limit: int = 200) -> str:
+def _first_sentence(text: str, limit: int = 240) -> str:
     sentence = text.split(". ")[0].strip()
     if len(sentence) > limit:
         sentence = sentence[:limit] + "…"
@@ -33,23 +50,119 @@ def _first_sentence(text: str, limit: int = 200) -> str:
 
 
 class Announcer:
-    def __init__(self, slack: AsyncWebClient, *, channel: str, dashboard_base_url: str,
-                 workplace: str) -> None:
+    def __init__(
+        self,
+        slack: AsyncWebClient,
+        *,
+        channel: str,
+        dashboard_base_url: str,
+        workplace: str,
+        ship_ping: str = "",
+    ) -> None:
         self._slack = slack
         self._channel = channel
         self._dashboard_base_url = dashboard_base_url.rstrip("/")
         self._workplace = workplace
+        self._ship_ping = ship_ping.strip()
 
     def _cert_link(self, cert_id: str) -> str:
         return f"{self._dashboard_base_url}/{self._workplace}/certifications/{cert_id}"
 
-    def ship_text(self, cert: CertSummary) -> str:
-        lines = [f"*New ship!!* :yay:  \n {cert.project_name} · {cert.project_type or '?'}"]
-        submitter = cert.submitter_username or cert.submitter_name
-        if submitter:
-            lines.append(f"by {submitter}")
-        lines.append(f"<{self._cert_link(cert.id)}|open in dashboard>")
-        return "\n".join(lines)
+    def _ping_mrkdwn(self) -> str | None:
+        """Render the configured cc target as a Slack mention (or literal text)."""
+        ping = self._ship_ping
+        if not ping:
+            return None
+        if ping.startswith("S"):  # usergroup / subteam
+            return f"<!subteam^{ping}>"
+        if ping[0] in ("U", "W"):  # user
+            return f"<@{ping}>"
+        return ping
+
+    @staticmethod
+    def _submitted_mrkdwn(created_at: datetime | None) -> str:
+        if not created_at:
+            return "—"
+        ts = int(created_at.timestamp())
+        fallback = created_at.strftime("%b %d at %I:%M %p").replace(" 0", " ")
+        return f"<!date^{ts}^{{date_short_pretty}} at {{time}}|{fallback}>"
+
+    def _ship_attachment(
+        self,
+        cert: CertSummary,
+        *,
+        status_label: str,
+        verdict_block: dict | None = None,
+    ) -> dict:
+        """Build the coloured Block Kit attachment for a ship announcement."""
+        color, _ = _STATUS_STYLE.get(status_label, _DEFAULT_STYLE)
+        ptype = cert.project_type or "?"
+
+        blocks: list[dict] = [
+            {"type": "section", "text": {"type": "mrkdwn", "text": "*New Ship in the Queue!*"}},
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": f"*{cert.project_name}*  ·  `{ptype}`  ·  `{status_label}`",
+                },
+            },
+        ]
+        if cert.description:
+            blocks.append(
+                {"type": "section", "text": {"type": "mrkdwn", "text": cert.description.strip()}}
+            )
+
+        if verdict_block:
+            blocks.append(verdict_block)
+
+        blocks.append({"type": "divider"})
+        blocks.append(
+            {
+                "type": "section",
+                "fields": [
+                    {"type": "mrkdwn", "text": f"*Dev Time:*\n{cert.dev_time or '—'}"},
+                    {
+                        "type": "mrkdwn",
+                        "text": f"*Submitted:*\n{self._submitted_mrkdwn(cert.created_at)}",
+                    },
+                ],
+            }
+        )
+
+        link_parts = [f"<{self._cert_link(cert.id)}|#{cert.external_id or '?'}>"]
+        if cert.demo_url:
+            link_parts.append(f"<{cert.demo_url}|Demo>")
+        if cert.repo_url:
+            link_parts.append(f"<{cert.repo_url}|Repo>")
+        if cert.readme_url:
+            link_parts.append(f"<{cert.readme_url}|README>")
+        blocks.append(
+            {"type": "context", "elements": [{"type": "mrkdwn", "text": "  ·  ".join(link_parts)}]}
+        )
+
+        if ping := self._ping_mrkdwn():
+            blocks.append(
+                {"type": "context", "elements": [{"type": "mrkdwn", "text": f"cc {ping}"}]}
+            )
+
+        return {"color": color, "blocks": blocks, "fallback": self._fallback_text(cert)}
+
+    @staticmethod
+    def _fallback_text(cert: CertSummary) -> str:
+        return f"New ship: {cert.project_name} ({cert.project_type or '?'})"
+
+    def _verdict_block(self, outcome: ReviewOutcome) -> dict | None:
+        review = outcome.review
+        _, emoji = _STATUS_STYLE.get(_VERDICT_LABEL.get(review.verdict, ""), _DEFAULT_STYLE)
+        parts: list[str] = []
+        if review.reasoning:
+            parts.append(f"{emoji} {_first_sentence(review.reasoning)}")
+        if review.special_flags:
+            parts.append(f":triangular_flag_on_post: {', '.join(review.special_flags)}")
+        if not parts:
+            return None
+        return {"type": "section", "text": {"type": "mrkdwn", "text": "\n".join(parts)}}
 
     async def announce_online(self, poll_interval: float) -> None:
         try:
@@ -61,27 +174,36 @@ class Announcer:
             logger.exception("Failed to send online announcement")
 
     async def announce_ship(self, cert: CertSummary) -> str:
-        """Post the new-ship message + threaded status note; returns the parent ts."""
-        post = await self._slack.chat_postMessage(channel=self._channel, text=self.ship_text(cert))
+        """Post the new-ship embed + threaded status note; returns the parent ts."""
+        post = await self._slack.chat_postMessage(
+            channel=self._channel,
+            text=self._fallback_text(cert),
+            attachments=[self._ship_attachment(cert, status_label=_AUTOMATING)],
+        )
         ts: str = post["ts"]
         await self._slack.chat_postMessage(
             channel=self._channel,
             thread_ts=ts,
-            text=":think: Running the automated review, this might take a few minutes…",
+            text=":Running the automated review..",
         )
         return ts
 
     async def post_outcome(self, cert: CertSummary, outcome: ReviewOutcome, parent_ts: str) -> None:
-        """Edit the parent and upload every available review artifact."""
-        review = outcome.review
-        emoji = VERDICT_EMOJI.get(review.verdict, ":grey_question:")
-        text = self.ship_text(cert) + f"\n\n{emoji} *{review.verdict.value}*"
-        if review.reasoning:
-            text += f"\n{_first_sentence(review.reasoning)}"
-        if review.special_flags:
-            text += f"\n:triangular_flag_on_post: {', '.join(review.special_flags)}"
+        """Update the embed with the verdict, then upload every available artifact."""
+        status_label = _VERDICT_LABEL.get(outcome.review.verdict, "NEEDS HUMAN")
         try:
-            await self._slack.chat_update(channel=self._channel, ts=parent_ts, text=text)
+            await self._slack.chat_update(
+                channel=self._channel,
+                ts=parent_ts,
+                text=self._fallback_text(cert),
+                attachments=[
+                    self._ship_attachment(
+                        cert,
+                        status_label=status_label,
+                        verdict_block=self._verdict_block(outcome),
+                    )
+                ],
+            )
         except Exception:
             logger.exception("Failed to update parent message with verdict")
 
@@ -91,7 +213,7 @@ class Announcer:
                 thread_ts=parent_ts,
                 file=str(outcome.pdf_path),
                 filename="review_report.pdf",
-                initial_comment=":thumbup-nobg: Review complete!",
+                initial_comment="done",
             )
         else:
             await self._slack.chat_postMessage(
@@ -106,7 +228,7 @@ class Announcer:
                 thread_ts=parent_ts,
                 file=str(outcome.video_path),
                 filename="review_walkthrough.mp4",
-                initial_comment=":movie_camera: Visual evidence walkthrough",
+                initial_comment="vid",
             )
         elif outcome.video_error:
             await self._slack.chat_postMessage(

@@ -84,7 +84,15 @@ class VideoPlan(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     headline: str = Field(min_length=1, max_length=100)
-    summary: str = Field(min_length=1, max_length=240)
+    summary: str = Field(
+        min_length=1,
+        max_length=240,
+        description=(
+            "One sentence addressed to the project's author in the second person, "
+            "opening with the outcome, e.g. 'Your project was rejected because …' "
+            "(or 'approved'/'needs a human reviewer' to match the verdict)."
+        ),
+    )
     scenes: list[DirectedScene] = Field(min_length=1, max_length=3)
 
     @model_validator(mode="after")

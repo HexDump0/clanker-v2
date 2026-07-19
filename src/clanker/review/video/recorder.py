@@ -137,7 +137,9 @@ async def record_video_script(
     skipped: list[str] = []
     with tempfile.TemporaryDirectory(prefix="clanker-video-") as tmp:
         async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
+            browser = await p.chromium.launch(
+                headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"]
+            )
             try:
                 context = await browser.new_context(
                     viewport=VIEWPORT,

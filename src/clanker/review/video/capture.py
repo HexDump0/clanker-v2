@@ -167,10 +167,13 @@ async def capture_evidence(
     host_cache: dict[str, bool] = {}
 
     async with async_playwright() as playwright:
+        launch_args = ["--no-sandbox", "--disable-dev-shm-usage"]
         try:
-            browser = await playwright.chromium.launch(headless=True, channel="chromium")
+            browser = await playwright.chromium.launch(
+                headless=True, channel="chromium", args=launch_args
+            )
         except Exception:
-            browser = await playwright.chromium.launch(headless=True)
+            browser = await playwright.chromium.launch(headless=True, args=launch_args)
         try:
             context = await browser.new_context(
                 viewport=VIEWPORT,
