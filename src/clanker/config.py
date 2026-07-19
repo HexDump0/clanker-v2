@@ -7,6 +7,8 @@ Loaded from the environment and an optional ``.env`` file at the repo root.
 
 from __future__ import annotations
 
+import os
+import re
 from pathlib import Path
 from typing import Literal
 
@@ -113,6 +115,20 @@ def load_settings() -> Settings:
     return Settings()
 
 
+def _httpx_excluded_urls(settings: Settings, existing: str = "") -> str:
+    """OpenTelemetry URL filters, including the watcher's noisy queue poll."""
+    base_url = re.escape(settings.shipwrights_base_url.rstrip("/"))
+    workplace = re.escape(settings.shipwrights_workplace)
+    pending_poll = (
+        rf"^{base_url}/api/v1/workplaces/{workplace}/certifications\?"
+        rf"[^#]*status=PENDING(?:&|$)"
+    )
+    patterns = [pattern.strip() for pattern in existing.split(",") if pattern.strip()]
+    if pending_poll not in patterns:
+        patterns.append(pending_poll)
+    return ",".join(patterns)
+
+
 def configure_observability(settings: Settings) -> None:
     """Set up logfire if available/configured; a no-op otherwise."""
     import logfire
@@ -123,4 +139,11 @@ def configure_observability(settings: Settings) -> None:
         token=settings.logfire_token or None,
     )
     logfire.instrument_pydantic_ai()
+    # OpenTelemetry's HTTPX integration reads URL exclusions when instrumentation
+    # starts. Keep useful HTTP spans while dropping the watcher's repetitive
+    # `GET .../certifications?status=PENDING` requests.
+    exclusion_variable = "OTEL_PYTHON_HTTPX_EXCLUDED_URLS"
+    os.environ[exclusion_variable] = _httpx_excluded_urls(
+        settings, os.environ.get(exclusion_variable, "")
+    )
     logfire.instrument_httpx()
