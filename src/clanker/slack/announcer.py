@@ -99,7 +99,6 @@ class Announcer:
         ptype = cert.project_type or "?"
 
         blocks: list[dict] = [
-            {"type": "section", "text": {"type": "mrkdwn", "text": "*New Ship in the Queue!*"}},
             {
                 "type": "section",
                 "text": {
@@ -141,11 +140,11 @@ class Announcer:
             {"type": "context", "elements": [{"type": "mrkdwn", "text": "  ·  ".join(link_parts)}]}
         )
 
-        if ping := self._ping_mrkdwn():
-            blocks.append(
-                {"type": "context", "elements": [{"type": "mrkdwn", "text": f"cc {ping}"}]}
-            )
-
+        # NOTE: the cc ping deliberately does NOT live in the embed. The embed is
+        # the thread parent for the running note / PDF / video, so a mention here
+        # would make the pinged user follow the thread and get re-notified for
+        # every one of those replies. The ping goes on a separate standalone
+        # message instead (see ``announce_ship``).
         return {"color": color, "blocks": blocks, "fallback": self._fallback_text(cert)}
 
     @staticmethod
@@ -174,10 +173,32 @@ class Announcer:
             logger.exception("Failed to send online announcement")
 
     async def announce_ship(self, cert: CertSummary) -> str:
-        """Post the new-ship embed + threaded status note; returns the parent ts."""
+        """Post the ping headline + a separate embed; returns the embed's ts.
+
+        Two separate top-level messages, on purpose:
+
+        1. A plain-text headline (``New ship: …``) that carries the group ping.
+           It is standalone — nothing is ever threaded under it — so the mention
+           notifies the target exactly once and never re-fires.
+        2. The coloured embed, with NO mention. This is the thread parent for the
+           running note, PDF, and video, so those replies don't re-ping anyone.
+        """
+        headline = self._fallback_text(cert)
+        headline_blocks: list[dict] = [
+            {"type": "section", "text": {"type": "mrkdwn", "text": headline}}
+        ]
+        if ping := self._ping_mrkdwn():
+            # A context block is Slack's smallest text style; the mention inside
+            # it still notifies the target.
+            headline_blocks.append(
+                {"type": "context", "elements": [{"type": "mrkdwn", "text": f"cc {ping}"}]}
+            )
+        await self._slack.chat_postMessage(
+            channel=self._channel, text=headline, blocks=headline_blocks
+        )
+
         post = await self._slack.chat_postMessage(
             channel=self._channel,
-            text=self._fallback_text(cert),
             attachments=[self._ship_attachment(cert, status_label=_AUTOMATING)],
         )
         ts: str = post["ts"]
@@ -195,7 +216,6 @@ class Announcer:
             await self._slack.chat_update(
                 channel=self._channel,
                 ts=parent_ts,
-                text=self._fallback_text(cert),
                 attachments=[
                     self._ship_attachment(
                         cert,
