@@ -27,8 +27,12 @@ items below in this stage — nothing else.
    **If the claimed type conflicts with what you detect**, always use YOUR detected
    type and set `type_mismatch: true`.
 
-2. **Repo accessibility**: confirm via `get_github_repo_info` that the repository
-   exists and is public. A 404 or private repo is an instant reject.
+2. **Repo accessibility and source availability**: confirm via
+   `get_github_repo_info` that the repository exists and is public. Use the packet tree
+   (or `get_github_repo_tree` when it is missing) to confirm the actual project source
+   is present, not only a README, binaries, screenshots, or an empty shell. Every ship
+   must be open-source. A 404, private repo, empty repo, or repo with no meaningful
+   project source is an instant reject.
 
 3. **README existence**: the packet includes the README if the dashboard could fetch
    it. If it's missing or empty, double-check with `get_github_readme` before
@@ -46,12 +50,19 @@ items below in this stage — nothing else.
 
 6. **Demo URL early screening** (flag): record matches against problematic patterns
    (`check_url` flags these automatically): Google Drive, Google Colab,
-   Hugging Face, Kaggle, `*.onrender.com`, `*.up.railway.app`, ngrok, localhost.
+   Hugging Face, Kaggle, `*.onrender.com`, `*.up.railway.app`, Streamlit Community
+   Cloud, ngrok, cloudflared/trycloudflare, DuckDNS, and localhost.
+
+7. **Explicit prior-program disclosure** (handoff): if the submission explicitly says
+   it predates Stardance or was submitted to another YSWS, competition, game jam, or
+   hackathon, pass that information to `pre_event_commits`. Do not attempt to discover
+   undisclosed prior submissions.
 
 ## Instant reject conditions
 
 - Repository does not exist (404) → instant reject
 - Repository is private → instant reject
+- Repository does not contain the project's meaningful source files → instant reject
 - No README file exists → instant reject
 
 On instant reject: set `instant_reject: true` with the reason, mark all rubric checks

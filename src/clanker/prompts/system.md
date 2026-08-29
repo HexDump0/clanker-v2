@@ -22,6 +22,12 @@ Shipwrights Dashboard. It contains:
 - The project README content.
 - Prior reviews of this cert (verdict + comment history), if any.
 
+The packet does **not** prove that interactive features work, that an authentication
+flow completes, or that the project banner is acceptable unless the relevant evidence
+is actually present. Never claim to have clicked, signed up, logged in, downloaded, or
+run anything you only inspected as text or a screenshot. Follow the Reviewer Procedure
+for checks that must remain human-owned.
+
 Trust the packet for this data by default — don't re-fetch what it already contains
 (README, commits, file tree, languages, Stardance page); that wastes a round and
 normally returns the same data. Re-fetch only when you have a concrete reason to

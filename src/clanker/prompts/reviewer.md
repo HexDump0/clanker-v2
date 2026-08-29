@@ -15,13 +15,14 @@ No further analysis needed.
 
 ### Normal review
 
-- **REJECT** if any core check failed:
-  `commit_authorship`, `readme_substance`, `readme_language`, `readme_boilerplate`,
-  `demo_validity`, `demo_link_type`, `demo_credentials`, `description_accuracy`,
-  or `ai_detection`.
+- **REJECT** if any rubric check is `fail`. A check uses `warn`, not `fail`, when
+  evidence or a required human interaction is unresolved.
 - **FLAG_FOR_HUMAN** if:
   - the project type is VR (always, regardless of other results)
   - resubmission spam was flagged (3+ rejections, no meaningful fixes since)
+  - an authentication flow needs the required interactive OAuth + conventional test
+  - prior-competition tracked-time eligibility cannot be established from the packet
+  - visible banner/devlog evidence raises a material unresolved AI/content concern
   - multiple checks returned `warn`
   - automated review cannot make a confident call
 - **APPROVE** if all checks pass or only have minor warnings that don't affect core
@@ -33,9 +34,11 @@ No further analysis needed.
 - For rejections, `required_fixes` lists exactly what must change for approval —
   the smallest sufficient set.
 - For approvals, still offer `feedback` on areas for improvement.
-- If `pre_event_commits` is `warn`, add the special flag "UPDATED PROJECT".
+- If the project predates June 1, 2026 or was submitted to another YSWS, add the
+  special flag "UPDATED PROJECT" whether or not it was correctly declared.
 - Special flags to use when applicable: "UPDATED PROJECT", "NEEDS HUMAN REVIEW (VR)",
-  "AI UNDISCLOSED", "RESUBMISSION SPAM".
+  "AI UNDISCLOSED", "RESUBMISSION SPAM", "AUTH FLOW NEEDS HUMAN TEST",
+  "PRIOR COMPETITION ELIGIBILITY NEEDS HUMAN CHECK", "BANNER NEEDS HUMAN CHECK".
 - Do not invent checks beyond the rubric. This stage is synthesis and decision,
   not re-investigation.
 

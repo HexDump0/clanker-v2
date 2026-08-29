@@ -11,6 +11,7 @@ from pydantic_ai.models.test import TestModel
 
 from clanker.config import Settings
 from clanker.review.agent import (
+    build_chat_instructions,
     build_model_settings,
     build_review_instructions,
     create_review_agent,
@@ -147,6 +148,41 @@ async def test_fetch_page_text_reports_reachability():
     await tools.aclose()
 
 
+@pytest.mark.parametrize(
+    ("url", "expected_flag"),
+    [
+        ("https://demo.streamlit.app/", "streamlit"),
+        ("https://project.trycloudflare.com/", "cloudflared"),
+        ("https://project.duckdns.org/", "duckdns"),
+    ],
+)
+async def test_url_checks_flag_current_disallowed_hosts(url, expected_flag):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, headers={"content-type": "text/html"}, text="ok")
+
+    tools = ReviewTools()
+    tools._web = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    payload = json.loads(await tools.check_url(url))
+    assert payload["flags"] == [expected_flag]
+    await tools.aclose()
+
+
+async def test_url_checks_flag_disallowed_redirect_destination():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "example.com":
+            return httpx.Response(302, headers={"location": "https://redirected.streamlit.app/"})
+        return httpx.Response(200, headers={"content-type": "text/html"}, text="ok")
+
+    tools = ReviewTools()
+    tools._web = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), follow_redirects=True
+    )
+    payload = json.loads(await tools.fetch_page_text("https://example.com/demo"))
+    assert payload["final_url"] == "https://redirected.streamlit.app/"
+    assert payload["flags"] == ["streamlit"]
+    await tools.aclose()
+
+
 async def test_render_page_rejects_invalid_url():
     result = await render_page("ftp://nope")
     assert result.ok is False
@@ -280,6 +316,23 @@ def test_review_instructions_reference_real_tools():
     referenced = set(re.findall(r"review_[a-z_]+", text))
     assert referenced <= tool_names, f"prompt references unknown tools: {referenced - tool_names}"
     assert "review_generate_pdf" not in text
+
+
+def test_review_and_chat_prompts_include_current_shipwright_rules():
+    review = build_review_instructions()
+    chat = build_chat_instructions()
+
+    for text in (review, chat):
+        assert "Streamlit Community Cloud" in text
+        assert "submitted to another competition, game jam, or hackathon" in text
+        assert "OAuth option" in text
+        assert "completely vibe-coded generic project" in text
+        assert "GitHub Actions workflow" in text
+        assert "does **not** satisfy this proof-video requirement" in text
+
+    assert "GitHub Releases as the distribution" in review
+    assert "OR a GitHub Release containing the mod's `.jar`" not in review
+    assert "Models made in Tinkercad" not in review
 
 
 def make_settings(**overrides) -> Settings:

@@ -19,27 +19,52 @@ description/demo matches the repo content.
 - **fail**: mismatch between description and repo
 
 ### 3. repo_link_valid
-The repo link must point to the repo root, not a specific file or subdirectory.
-- **pass**: repo root URL
-- **fail**: points at a file, blob, or unrelated page
+The repo link must point to the repo root, not a specific file or subdirectory, and
+the complete meaningful project source must be publicly available there.
+- **pass**: public repo-root URL containing the project source
+- **fail**: points at a file/blob/unrelated page, or the public repo omits the actual
+  source and contains only binaries, screenshots, a README, or an empty shell
 
 ### 4. pre_event_commits
-Check commit history for activity before **June 1, 2026** (the event cutoff —
-projects started before Stardance, or previously submitted to another YSWS, must be
-declared as updates).
-- **pass**: no commits before the cutoff, OR commits exist AND the submission is
-  declared as an update (check the `updated_project` field in the packet and the
-  description for an "UPDATED PROJECT" mention)
-- **warn**: commits before the cutoff but not declared as an update
-- (never fail)
+Check project history against **June 1, 2026**, the Stardance cutoff.
+
+- A project started before June 1, 2026 or previously submitted to another YSWS must
+  be marked as an updated project.
+- A project submitted to another competition, game jam, or hackathon is ineligible
+  unless the packet shows that new work time was tracked after Stardance began (for
+  example, more features built during qualifying tracked time or a restart from
+  scratch). A later commit by itself is not proof that time was tracked.
+- **pass**: no pre-cutoff/prior-program evidence; OR it is correctly declared as an
+  update and any prior-competition submission has explicit post-start tracked-time
+  evidence
+- **warn**: it should be marked updated but is not; OR prior-competition eligibility
+  is disclosed but the available packet cannot establish whether post-start time was
+  tracked (also request human verification)
+- **fail**: the project was submitted to another competition/game jam/hackathon and
+  the evidence shows no qualifying tracked work after Stardance began
 
 ### 5. ai_detection
-Analyze the README for signs of AI generation (generic phrasing, ChatGPT-style
-structure like "🚀 Features", boilerplate "Getting Started", polish that doesn't match
-code quality). Also check the demo site for AI-generated content. If AI usage is
-detected, check the `ai_declaration` field in the packet.
-- **pass**: no AI signals, OR AI detected and declared in the submission
-- **fail**: AI signals detected but no AI declaration
+Check the README, release description, project/demo, devlogs, and any visible generated
+images or logos against the AI declaration. Base this only on clear, concrete evidence;
+professional writing, a conventional "Features"/"Getting Started" structure, or emojis
+alone do not prove AI use.
+
+- A completely AI-written README (especially generic copy filled with excessive emoji)
+  must be returned. AI-assisted writing is allowed when the README is primarily in the
+  shipper's own words, clear, readable, and project-specific.
+- An AI-generated project banner is forbidden. The banner must be a screenshot of the
+  project in action, not a generated image, logo, or irrelevant/inappropriate art.
+- A completely vibe-coded generic project must be returned. Ask the shipper to add
+  their own styling, design choices, and personal touches throughout the project.
+- Ordinary AI assistance and generated assets must be clearly disclosed. If use seems
+  undisclosed but is not one of the hard failures above, **warn**, add `AI UNDISCLOSED`,
+  continue testing the other requirements, and report it without pressuring the shipper
+  to make a declaration.
+- **pass**: no concrete AI concern, or allowed AI assistance is adequately declared
+- **warn**: concrete but non-disqualifying AI use appears undeclared, or visible
+  banner/devlog evidence raises a material concern that needs human confirmation
+- **fail**: clearly completely AI-written README, AI-generated banner, or completely
+  vibe-coded generic project lacking the shipper's own design/personal contribution
 
 ### 6. commit_authorship
 Check the commit history for suspicious patterns: no commits at all, or a single
@@ -62,8 +87,11 @@ hot-reloads", Angular CLI "generated with"); README that is just pasted source c
 - **fail**: boilerplate, scaffold README, or pasted code
 
 ### 8. readme_substance
-The README should explain what the project is, how to use it, and relevant setup.
-A few lines is not enough for most project types (simple portfolio sites get leeway).
+The README must be raw Markdown, written in English, and explain what the project is,
+how to use it, and relevant setup/download steps and features. The needed depth depends
+on the project: a portfolio may briefly cover development and features, while a CLI,
+API, bot, or library needs detailed installation and usage instructions. It must never
+be only a one-line "this is a ..." description.
 - **pass**: substantive and informative
 - **fail**: too short or content-free
 
@@ -79,17 +107,26 @@ Validate the demo link/artifact against the **detected project type from pre-che
 (NOT the claimed type), using the Demo Guidelines reference. If pre-check flagged a
 `type_mismatch`, pay extra attention. Cross-reference the demo against the actual
 project: does the URL make sense for what the code is, and does it show the same
-project as the repo? Do NOT test demo functionality — that is for human reviewers.
+project as the repo? Inspect the evidence available to you, but do not claim that static
+text/code/screenshot inspection functionally tested the project. The human reviewer must
+test features while recording the required proof video.
 - **pass**: demo matches the expected format for the detected type
 - **warn**: demo exists but on a discouraged platform, or detected type is ambiguous
 - **fail**: demo missing, wrong type for the detected project, or unrelated to the repo
 
 ### 11. demo_credentials
 Premade/shared credentials are NOT allowed — reviewers must be able to create their
-own account. Check README, description, and demo page for "demo account", "test
-credentials", "username: … password: …" patterns.
-- **pass**: no premade credentials required
-- **fail**: demo requires shared/premade login details
+own account. Check README, description, demo page, and relevant auth code for "demo
+account", "test credentials", "username: … password: …" patterns and for a real
+sign-up path. A human reviewer must test at least one offered OAuth option and also the
+conventional sign-up/login path so all authenticated features are exercised.
+- **pass**: authentication is present, self-registration is available, and the required
+  human OAuth/conventional interaction test was completed successfully
+- **warn**: self-registration appears available, but Clanker cannot establish that the
+  OAuth and conventional flows actually complete; request human testing
+- **fail**: the project requires a premade/shared/shipwright account, does not allow the
+  reviewer to create their own account, or the human test establishes a broken required
+  auth path
 - **skip**: project has no authentication at all
 - Exception: for API projects, documented test credentials / demo API keys for trying
   endpoints are acceptable (the API guide even recommends them) — this rule targets
@@ -104,9 +141,11 @@ code/demo.
 
 ### 13. demo_link_type
 Universal link rules, independent of project type: Google Drive, Google Colab,
-Kaggle notebooks, Hugging Face, Render/Railway free tier (for web apps), tunnel
-links (ngrok, cloudflared, DuckDNS), zips of source, raw source files (`.py`,
-`.js`) are all rejected.
+Kaggle notebooks, Hugging Face, Render/Railway/Streamlit free hosting (for web apps),
+tunnel or dynamic-DNS links (ngrok, cloudflared/trycloudflare, DuckDNS), localhost,
+zips of source, and raw source files (`.py`, `.js`) are all rejected. Web hosting that
+is observably too slow or repeatedly cold-starts is also invalid; do not fail a site for
+one transient slow request without corroborating evidence.
 - **pass**: not on any rejected platform/format
 - **fail**: uses a universally rejected platform/format
 
@@ -125,3 +164,6 @@ links (ngrok, cloudflared, DuckDNS), zips of source, raw source files (`.py`,
   `get_github_file_content` (or `search_github_code`).
 - AI declaration / update flag: `ai_declaration` and `updated_project` fields in the
   packet; `fetch_stardance_project` only as a fallback.
+- Banner: use the Stardance page's `image` metadata URL when present. `render_page` may
+  inspect that public image when needed to distinguish an in-action screenshot from a
+  logo/irrelevant image. Treat uncertain AI provenance as a human check, not a guess.

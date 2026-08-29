@@ -154,7 +154,9 @@ class ReviewOutput(BaseModel):
         default=None,
         description=(
             'e.g. "UPDATED PROJECT", "NEEDS HUMAN REVIEW (VR)", "AI UNDISCLOSED", '
-            '"RESUBMISSION SPAM".'
+            '"RESUBMISSION SPAM", "AUTH FLOW NEEDS HUMAN TEST", '
+            '"PRIOR COMPETITION ELIGIBILITY NEEDS HUMAN CHECK", '
+            '"BANNER NEEDS HUMAN CHECK".'
         ),
     )
     video_evidence: list[VideoEvidence] = Field(

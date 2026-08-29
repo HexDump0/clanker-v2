@@ -37,6 +37,7 @@ def build_review_instructions() -> str:
             "# Stage 2: Checks\n\n" + _prompt("checks.md"),
             "# Stage 3: Verdict\n\n" + _prompt("reviewer.md"),
             "# Demo Guidelines Reference\n\n" + _prompt("demo_guidelines.md"),
+            "# Human Reviewer Procedure\n\n" + _prompt("reviewer_procedure.md"),
         ]
     )
 
@@ -86,6 +87,7 @@ def build_chat_instructions() -> str:
             "## The rubric (checks)\n\n" + _prompt("checks.md"),
             "## Pre-check gates (instant-reject conditions)\n\n" + _prompt("precheck.md"),
             "## Demo guidelines\n\n" + _prompt("demo_guidelines.md"),
+            "## Human reviewer procedure\n\n" + _prompt("reviewer_procedure.md"),
         ]
     )
 

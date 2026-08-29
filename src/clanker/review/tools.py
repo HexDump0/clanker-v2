@@ -42,10 +42,27 @@ _URL_FLAGS = {
     "kaggle.com": "kaggle",
     ".onrender.com": "render",
     ".up.railway.app": "railway",
+    ".streamlit.app": "streamlit",
+    "share.streamlit.io": "streamlit",
     "ngrok": "ngrok",
+    "trycloudflare.com": "cloudflared",
+    "cloudflared": "cloudflared",
+    "duckdns": "duckdns",
     "localhost": "localhost",
     "127.0.0.1": "localhost",
 }
+
+
+def _platform_flags(*urls: str) -> list[str]:
+    """Return stable, de-duplicated policy flags for requested/final URLs."""
+    return list(
+        dict.fromkeys(
+            flag
+            for url in urls
+            for marker, flag in _URL_FLAGS.items()
+            if marker in url.lower()
+        )
+    )
 
 
 def _ok(data: Any) -> str:
@@ -510,17 +527,17 @@ class ReviewTools:
         """Check if a URL is reachable: status code, final URL, content type.
 
         Also flags problematic platforms (google_drive, colab, huggingface,
-        kaggle, render, railway, ngrok, localhost). Does NOT return page content.
+        kaggle, render, railway, streamlit, ngrok, cloudflared, duckdns,
+        localhost). Redirect destinations are checked too. Does NOT return page content.
         If you are going to read the page anyway, call fetch_page_text
         directly — it reports the same reachability info alongside the text.
         """
         if not url or not url.startswith(("http://", "https://")):
             return _err(f"Invalid URL: {url}")
-        lower = url.lower()
-        flags = [flag for marker, flag in _URL_FLAGS.items() if marker in lower]
-        flags = list(dict.fromkeys(flags))
+        flags = _platform_flags(url)
         try:
             r = await self._web.get(url)
+            flags = _platform_flags(url, str(r.url))
             reachable = 200 <= r.status_code < 400
             # SPA fallback: crates.io/npm/PyPI pages can return non-200 for valid
             # resources; confirm via their APIs.
@@ -570,10 +587,10 @@ class ReviewTools:
         """
         if not url or not url.startswith(("http://", "https://")):
             return _err(f"Invalid URL: {url}")
-        lower = url.lower()
-        flags = list(dict.fromkeys(flag for marker, flag in _URL_FLAGS.items() if marker in lower))
+        flags = _platform_flags(url)
         try:
             r = await self._web.get(url)
+            flags = _platform_flags(url, str(r.url))
             challenge = _detect_challenge(r)
             if r.status_code >= 400 and not challenge:
                 return json.dumps(
