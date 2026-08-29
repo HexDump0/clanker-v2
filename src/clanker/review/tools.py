@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 
 GITHUB_API = "https://api.github.com"
 EXA_SEARCH_URL = "https://ai.hackclub.com/proxy/v1/exa/search"
-STARDANCE_COOKIE_NAME = "_stardance_session_v3"
+STARDANCE_COOKIE_NAME = "_stardance_session_4"
 TIMEOUT = 20.0
 BROWSER_HEADERS = {
     "User-Agent": (

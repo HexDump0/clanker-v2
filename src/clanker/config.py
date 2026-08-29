@@ -36,9 +36,9 @@ class Settings(BaseSettings):
         default="",
         description=(
             "Stardance (stardance.hackclub.com) login cookie value — the "
-            "`_stardance_session_v3` cookie. Lets fetch_stardance_project "
+            "`_stardance_session_4` cookie. Lets fetch_stardance_project "
             "load the auth-gated admin ship page. Value only; a leading "
-            "`_stardance_session_v3=` prefix is tolerated."
+            "`_stardance_session_4=` prefix is tolerated."
         ),
     )
 

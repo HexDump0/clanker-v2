@@ -149,6 +149,31 @@ async def test_fetch_page_text_reports_reachability():
 
 
 @pytest.mark.parametrize(
+    "configured_cookie",
+    ["current-session-token", "_stardance_session_4=current-session-token"],
+)
+async def test_stardance_fetch_sends_current_cookie_name(configured_cookie):
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers["cookie"] == "_stardance_session_4=current-session-token"
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/html"},
+            text='<meta property="og:title" content="Ship"><body>One devlog</body>',
+        )
+
+    tools = ReviewTools(stardance_session=configured_cookie)
+    tools._web = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    payload = json.loads(
+        await tools.fetch_stardance_project(
+            "https://stardance.hackclub.com/admin/certification/ship/123"
+        )
+    )
+    assert payload["ok"] is True
+    assert payload["meta"]["title"] == "Ship"
+    await tools.aclose()
+
+
+@pytest.mark.parametrize(
     ("url", "expected_flag"),
     [
         ("https://demo.streamlit.app/", "streamlit"),
