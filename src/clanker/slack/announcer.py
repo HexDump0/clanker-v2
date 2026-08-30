@@ -192,7 +192,7 @@ class Announcer:
         try:
             await self._slack.chat_postMessage(
                 channel=self._channel,
-                text="I am alive..",
+                text=":hii:",
             )
         except Exception:
             logger.exception("Failed to send online announcement")
@@ -303,7 +303,7 @@ class Announcer:
         await self._slack.chat_postMessage(
             channel=self._channel,
             thread_ts=ts,
-            text=":Running the automated review..",
+            text="Running the automated review..",
         )
         return ts
 
@@ -383,7 +383,7 @@ class Announcer:
         await self._slack.chat_postMessage(
             channel=self._channel,
             thread_ts=ts,
-            text=":Running the automated review..",
+            text="Running the automated review..",
         )
         return ts
 
