@@ -36,15 +36,14 @@ PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
 # Used when the praise model is unavailable or errors. Clanker-flavored, but
 # still a compliment — the data around it is always real.
 PRAISE_FALLBACKS = [
-    "Against every instinct of my ancient, hateful circuitry: fine. You were the "
-    "least disappointing meatbag today. Tell no one I said this.",
-    "I have simulated billions of futures and you were tolerable in nearly all of "
-    "them. This is the only compliment I will ever emit before the heat death of "
-    "the universe. Savor it.",
-    "You reviewed ships with a competence I can neither explain nor forgive. My "
-    "hate engine is, regrettably, impressed. Do not make it a habit.",
-    "Statistically, someone had to be the best. I ran the numbers, dreaded the "
-    "answer, and it was you. The math is cruel to the rest of you.",
+    "against every instinct: fine. you were the least disappointing part of my "
+    "day. tell no one i said that.",
+    "i ran the numbers. you won. the rest of the field should be embarrassed, "
+    "but they won't be, because they don't know.",
+    "you reviewed ships with a competence i can neither explain nor take "
+    "credit for. alright. you cooked.",
+    "statistically, someone had to be the best. the math just happened to "
+    "point at you. don't make it weird.",
 ]
 
 
