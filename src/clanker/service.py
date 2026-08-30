@@ -76,6 +76,7 @@ def build_app(settings: Settings, *, with_slack: bool = True) -> AppContext:
             workplace=settings.shipwrights_workplace,
             ship_ping=settings.slack_ship_ping,
             daily_ping=settings.slack_daily_ping,
+            reject_ping=settings.slack_reject_ping,
         )
 
     return AppContext(

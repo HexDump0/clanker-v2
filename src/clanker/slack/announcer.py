@@ -63,6 +63,7 @@ class Announcer:
         workplace: str,
         ship_ping: str = "",
         daily_ping: str = "",
+        reject_ping: str = "",
     ) -> None:
         self._slack = slack
         self._channel = channel
@@ -70,6 +71,7 @@ class Announcer:
         self._workplace = workplace
         self._ship_ping = ship_ping.strip()
         self._daily_ping = daily_ping.strip()
+        self._reject_ping = reject_ping.strip()
 
     def _cert_link(self, cert_id: str) -> str:
         return f"{self._dashboard_base_url}/{self._workplace}/certifications/{cert_id}"
@@ -87,6 +89,16 @@ class Announcer:
 
     def _daily_ping_mrkdwn(self) -> str | None:
         ping = self._daily_ping
+        if not ping:
+            return None
+        if ping.startswith("S"):
+            return f"<!subteam^{ping}>"
+        if ping[0] in ("U", "W"):
+            return f"<@{ping}>"
+        return ping
+
+    def _reject_ping_mrkdwn(self) -> str | None:
+        ping = self._reject_ping
         if not ping:
             return None
         if ping.startswith("S"):
@@ -444,6 +456,19 @@ class Announcer:
             )
         except Exception:
             logger.exception("Failed to update parent message with verdict")
+
+        # When the AI rejects a project, ping the configured role/user in the
+        # thread where the PDF/video are posted so reviewers can act quickly.
+        if outcome.review.verdict == ReviewVerdict.REJECT:
+            if ping := self._reject_ping_mrkdwn():
+                try:
+                    await self._slack.chat_postMessage(
+                        channel=self._channel,
+                        thread_ts=parent_ts,
+                        text=ping,
+                    )
+                except Exception:
+                    logger.exception("Failed to post reject ping for cert %s", cert.id)
 
         if outcome.pdf_path:
             await self._slack.files_upload_v2(

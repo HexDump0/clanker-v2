@@ -199,6 +199,16 @@ class Settings(BaseSettings):
             "text). Empty = no cc line."
         ),
     )
+    slack_reject_ping: str = Field(
+        default="",
+        description=(
+            "Who to ping in the ship thread when a review verdict is REJECT. "
+            "A usergroup id (starts with 'S') renders as a group ping, a user id "
+            "('U'/'W') as a user ping; any other value is shown as literal text. "
+            "Empty = no ping. Posted as a separate threaded message under the ship "
+            "embed where the PDF/video are sent."
+        ),
+    )
     daily_summary_enabled: bool = Field(
         default=True,
         description="Post the daily queue summary to Slack at DAILY_SUMMARY_TIME_UTC.",
