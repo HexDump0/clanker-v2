@@ -46,12 +46,13 @@ async def test_announce_ship_posts_parent_and_thread():
     cert = CertSummary.model_validate(make_cert("c1"))
     ts = await announcer.announce_ship(cert)
     assert ts == "111.222"
-    assert slack.chat_postMessage.call_count == 2
-    parent = slack.chat_postMessage.call_args_list[0].kwargs
+    assert slack.chat_postMessage.call_count == 3
+    parent = slack.chat_postMessage.call_args_list[1].kwargs
     attachment_blob = json.dumps(parent["attachments"])
     assert "Project c1" in attachment_blob
     assert "ds.shipwrights.dev/stardance/certifications/c1" in attachment_blob
     assert "AUTOMATING" in attachment_blob  # status badge while the review runs
+    assert slack.chat_postMessage.call_args_list[2].kwargs["thread_ts"] == "111.222"
 
 
 async def test_post_outcome_updates_parent_and_uploads_pdf(tmp_path):

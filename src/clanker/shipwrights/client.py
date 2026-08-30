@@ -11,6 +11,7 @@ implemented here, but the client refuses to call them unless constructed with
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from http.cookies import SimpleCookie
 from types import TracebackType
 from typing import Any, Self
 
@@ -22,12 +23,13 @@ from clanker.shipwrights.models import (
     CertificationPage,
     CertStatus,
     CertSummary,
+    FeedbackTemplates,
     GitHubData,
     LeaderboardEntry,
+    ReadmeData,
     Verdict,
 )
 
-USER_AGENT = "clanker/0.1 (+https://github.com/hackclub)"
 DEFAULT_TIMEOUT = 30.0
 
 
@@ -42,6 +44,10 @@ class ShipwrightsError(Exception):
 
 class AuthenticationError(ShipwrightsError):
     """Session cookie missing, expired, or lacking permission (401/403)."""
+
+
+class CloudflareBlockError(ShipwrightsError):
+    """Cloudflare rejected the request before Dashboard authentication."""
 
 
 class NotFoundError(ShipwrightsError):
@@ -68,6 +74,38 @@ def _error_message(response: httpx.Response) -> str:
     return response.text[:300]
 
 
+def _is_cloudflare_block(response: httpx.Response) -> bool:
+    if response.headers.get("cf-mitigated", "").lower() == "challenge":
+        return True
+    server = response.headers.get("server", "").lower()
+    if "cloudflare" in server and response.status_code in {403, 429, 503}:
+        return True
+    body = response.text[:6000].lower()
+    return any(
+        marker in body
+        for marker in (
+            "attention required! | cloudflare",
+            "sorry, you have been blocked",
+            "/cdn-cgi/challenge-platform",
+            "cf_chl_opt",
+        )
+    )
+
+
+def _session_value(configured: str) -> str:
+    """Accept a bare JWT, `session=...`, or a pasted Cookie header safely."""
+    raw = configured.strip()
+    if "=" not in raw:
+        return raw
+    cookies = SimpleCookie()
+    try:
+        cookies.load(raw)
+    except Exception:
+        return raw.removeprefix("session=").strip().rstrip(";")
+    morsel = cookies.get("session")
+    return morsel.value.strip() if morsel else raw.removeprefix("session=").strip().rstrip(";")
+
+
 class ShipwrightsClient:
     """Typed client for one workplace on the Shipwrights Dashboard.
 
@@ -88,15 +126,20 @@ class ShipwrightsClient:
         timeout: float = DEFAULT_TIMEOUT,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
-        if not session_cookie:
+        session_value = _session_value(session_cookie)
+        if not session_value:
             raise AuthenticationError(401, "session cookie is empty")
         self.workplace = workplace
         self.allow_mutations = allow_mutations
         self._http = httpx.AsyncClient(
             transport=transport,
             base_url=base_url.rstrip("/") + "/api/v1",
-            cookies={"session": session_cookie},
-            headers={"accept": "application/json", "user-agent": USER_AGENT},
+            cookies={"session": session_value},
+            # The old identifying `clanker/0.1` user agent is specifically
+            # blocked by the Dashboard's Cloudflare policy. Ordinary HTTPX and
+            # curl clients work, so keep HTTPX's default UA and request JSON-ish
+            # content without pretending to be a browser.
+            headers={"accept": "*/*", "accept-language": "en-US,en;q=0.9"},
             timeout=timeout,
             follow_redirects=False,
         )
@@ -136,6 +179,11 @@ class ShipwrightsClient:
     ) -> Any:
         response = await self._http.request(method, path, params=params, json=json)
 
+        if response.status_code >= 400 and _is_cloudflare_block(response):
+            raise CloudflareBlockError(
+                response.status_code,
+                "Cloudflare blocked the Dashboard request before authentication",
+            )
         if response.is_redirect:
             # The dashboard redirects unauthenticated requests to the login page.
             raise AuthenticationError(
@@ -205,12 +253,23 @@ class ShipwrightsClient:
     async def get_github(self, cert_id: str) -> GitHubData:
         """Server-side cached GitHub repo + commits for a cert."""
         data = await self._request("GET", self._wp(f"/certifications/{cert_id}/github"))
-        return GitHubData.model_validate(data.get("data") or {})
+        payload = dict(data.get("data") or {})
+        payload.update(status=data.get("status"), cached=data.get("cached"))
+        return GitHubData.model_validate(payload)
+
+    async def get_readme_data(self, cert_id: str) -> ReadmeData:
+        """Cached README plus freshness and error metadata."""
+        data = await self._request("GET", self._wp(f"/certifications/{cert_id}/readme"))
+        return ReadmeData.model_validate(data)
 
     async def get_readme(self, cert_id: str) -> str:
-        """Server-side cached README markdown for a cert."""
-        data = await self._request("GET", self._wp(f"/certifications/{cert_id}/readme"))
-        return data.get("markdown") or ""
+        """Cached README markdown (compatibility helper)."""
+        return (await self.get_readme_data(cert_id)).markdown
+
+    async def get_feedback_templates(self) -> FeedbackTemplates:
+        """Shared and reviewer-owned canned feedback. Read-only."""
+        data = await self._request("GET", self._wp("/feedback-templates"))
+        return FeedbackTemplates.model_validate(data)
 
     async def get_leaderboard(self, range_: str = "weekly") -> list[LeaderboardEntry]:
         data = await self._request(

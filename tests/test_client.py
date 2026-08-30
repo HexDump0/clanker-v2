@@ -6,6 +6,7 @@ import pytest
 from clanker.shipwrights import (
     AuthenticationError,
     CertStatus,
+    CloudflareBlockError,
     MutationNotAllowedError,
     NotFoundError,
     ShipwrightsClient,
@@ -23,6 +24,7 @@ async def test_list_certifications(client, dashboard):
     assert page.certs[0].status is CertStatus.PENDING
     # status param actually sent
     assert dashboard.requests[-1].url.params["status"] == "PENDING"
+    assert not dashboard.requests[-1].headers["user-agent"].startswith("clanker/")
 
 
 async def test_iter_certifications_walks_all_pages(client, dashboard):
@@ -53,6 +55,50 @@ async def test_get_certification_and_readme(client, dashboard):
     assert await client.get_readme("c1") == "# Hi"
 
 
+async def test_attempt_history_accepts_current_dashboard_shape(client, dashboard):
+    dashboard.details["c1"] = {
+        **make_cert("c1"),
+        "reviews": [],
+        "internalNotes": "Private reviewer lead",
+        "attempts": [
+            {
+                "id": "old-attempt",
+                "externalId": "10",
+                "projectName": "Earlier name",
+                "status": "REJECTED",
+                "createdAt": "2026-07-01T00:00:00.000Z",
+                "reviews": [
+                    {
+                        "verdict": "REJECTED",
+                        "comment": "README was incomplete",
+                        "createdAt": "2026-07-02T00:00:00.000Z",
+                        "reviewerSlackId": "U1",
+                        "reviewer": {
+                            "slackId": "U1",
+                            "displayName": "Reviewer",
+                            "slackAvatar": "https://example.com/avatar.png",
+                        },
+                    }
+                ],
+            }
+        ],
+    }
+
+    detail = await client.get_certification("c1")
+    assert detail.internal_notes == "Private reviewer lead"
+    assert detail.attempts[0].reviews[0].id is None
+    assert detail.attempts[0].reviews[0].reviewer.slack_id == "U1"
+
+
+async def test_feedback_templates_are_typed(client, dashboard):
+    dashboard.feedback_templates["shared"] = [
+        {"id": "t1", "title": "README", "body": "Please expand the README."}
+    ]
+    templates = await client.get_feedback_templates()
+    assert templates.shared[0].title == "README"
+    assert templates.reviewer_slack_username == "reviewer"
+
+
 async def test_not_found(client):
     with pytest.raises(NotFoundError):
         await client.get_certification("nope")
@@ -71,9 +117,43 @@ async def test_redirect_means_expired_session(dashboard):
         await client.list_certifications()
 
 
+async def test_cloudflare_block_has_distinct_error():
+    def blocked(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            403,
+            headers={"server": "cloudflare", "content-type": "text/html"},
+            text="<title>Attention Required! | Cloudflare</title> Sorry, you have been blocked",
+        )
+
+    client = ShipwrightsClient(
+        base_url="https://ds.shipwrights.dev",
+        session_cookie="valid-but-filtered",
+        transport=httpx.MockTransport(blocked),
+    )
+    with pytest.raises(CloudflareBlockError):
+        await client.list_certifications()
+
+
 def test_empty_cookie_rejected():
     with pytest.raises(AuthenticationError):
         ShipwrightsClient(base_url="https://x", session_cookie="")
+
+
+@pytest.mark.parametrize(
+    "configured",
+    ["jwt-value", "session=jwt-value", "last-workspace=stardance; session=jwt-value"],
+)
+async def test_dashboard_session_accepts_bare_or_pasted_cookie(configured):
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers["cookie"] == "session=jwt-value"
+        return httpx.Response(200, json={"certs": [], "total": 0, "page": 1, "pages": 1})
+
+    client = ShipwrightsClient(
+        base_url="https://ds.shipwrights.dev",
+        session_cookie=configured,
+        transport=httpx.MockTransport(handler),
+    )
+    await client.list_certifications()
 
 
 async def test_mutations_blocked_by_default(client):

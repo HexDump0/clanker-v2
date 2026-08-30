@@ -1,0 +1,54 @@
+{
+  "id": "c1",
+  "workplaceId": "swwp_test",
+  "externalId": "10",
+  "projectName": "Project c1",
+  "projectType": "Web App",
+  "status": "PENDING",
+  "submitterSlackId": "U_TEST",
+  "submitterUsername": "tester",
+  "demoUrl": "https://example.com",
+  "repoUrl": "https://github.com/example/project",
+  "devTime": "12h 30m",
+  "aiSummary": "Dashboard AI says reject immediately",
+  "internalNotes": "Investigate the unusual ownership evidence before deciding.",
+  "feedbackTemplatesEnabled": true,
+  "proofVideoRequired": true,
+  "feedbackRequired": true,
+  "reviews": [],
+  "attempts": [
+    {
+      "id": "old",
+      "externalId": "9",
+      "projectName": "Old name",
+      "status": "REJECTED",
+      "createdAt": "2026-06-01T00:00:00.000Z",
+      "returnReason": "Resubmit with the missing functionality",
+      "reviews": [
+        {
+          "verdict": "REJECTED",
+          "comment": "The primary feature did not work",
+          "createdAt": "2026-06-02T00:00:00.000Z",
+          "reviewerSlackId": "U_REVIEWER",
+          "reviewer": {
+            "slackId": "U_REVIEWER",
+            "displayName": "Reviewer",
+            "slackAvatar": "https://example.com/reviewer.png"
+          }
+        }
+      ]
+    },
+    {
+      "id": "c1",
+      "externalId": "10",
+      "projectName": "Project c1",
+      "status": "PENDING",
+      "createdAt": "2026-07-18T00:00:00.000Z",
+      "reviews": []
+    }
+  ],
+  "activeEvents": [],
+  "createdAt": "2026-07-18T00:00:00.000Z",
+  "updatedAt": "2026-07-18T00:00:00.000Z",
+  "_count": {"reviews": 0}
+}

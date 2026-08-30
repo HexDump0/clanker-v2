@@ -5,6 +5,7 @@ Reference: AI/context/API.md (reverse-engineered).
 
 from clanker.shipwrights.client import (
     AuthenticationError,
+    CloudflareBlockError,
     MutationNotAllowedError,
     NotFoundError,
     ShipwrightsClient,
@@ -12,25 +13,34 @@ from clanker.shipwrights.client import (
 )
 from clanker.shipwrights.models import (
     CertDetail,
+    CertificationAttempt,
     CertificationPage,
     CertStatus,
     CertSummary,
+    FeedbackTemplate,
+    FeedbackTemplates,
     GitHubCommit,
     GitHubData,
     GitHubRepo,
+    ReadmeData,
     Review,
     Verdict,
 )
 
 __all__ = [
     "AuthenticationError",
+    "CloudflareBlockError",
     "CertDetail",
+    "CertificationAttempt",
     "CertificationPage",
     "CertStatus",
     "CertSummary",
+    "FeedbackTemplate",
+    "FeedbackTemplates",
     "GitHubCommit",
     "GitHubData",
     "GitHubRepo",
+    "ReadmeData",
     "MutationNotAllowedError",
     "NotFoundError",
     "Review",

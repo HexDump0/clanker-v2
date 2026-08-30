@@ -8,7 +8,9 @@ scraping (the verdict is the agent's validated output).
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -26,6 +28,31 @@ from clanker.review.video.pipeline import generate_review_video
 from clanker.shipwrights import ShipwrightsClient
 
 logger = logging.getLogger(__name__)
+
+
+class PrivateContextLeakError(RuntimeError):
+    """The model copied private reviewer notes into public review output."""
+
+
+def _guard_private_context(review: ReviewOutput, private_values: list[str]) -> None:
+    """Block artifacts when a meaningful private-note phrase is copied verbatim."""
+    public = re.sub(
+        r"\s+",
+        " ",
+        json.dumps(review.model_dump(mode="json"), ensure_ascii=False).lower(),
+    )
+    for value in private_values:
+        normalized = re.sub(r"\s+", " ", value).strip().lower()
+        candidates = [normalized]
+        candidates.extend(
+            re.sub(r"\s+", " ", part).strip().lower()
+            for part in re.split(r"[\n.!?]+", value)
+        )
+        leaked = next((part for part in candidates if len(part) >= 24 and part in public), None)
+        if leaked:
+            raise PrivateContextLeakError(
+                "review output copied private Dashboard notes; public artifacts were blocked"
+            )
 
 
 @dataclass(slots=True)
@@ -69,6 +96,7 @@ class ReviewRunner:
 
         result = await self._agent.run(packet.to_prompt())
         review = result.output
+        _guard_private_context(review, getattr(packet, "private_context", []))
         usage = result.usage
         logger.info(
             "Cert %s verdict: %s (%s) | tokens: %d in / %d out / %d requests",

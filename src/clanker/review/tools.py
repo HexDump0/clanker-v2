@@ -15,8 +15,10 @@ from __future__ import annotations
 import html
 import json
 import re
+from datetime import UTC, datetime
+from html.parser import HTMLParser
 from typing import TYPE_CHECKING, Any
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import httpx
 
@@ -70,8 +72,10 @@ def _ok(data: Any) -> str:
     return json.dumps(payload)
 
 
-def _err(reason: str) -> str:
-    return json.dumps({"ok": False, "error": reason})
+def _err(reason: str, *, category: str = "tool_error", **details: Any) -> str:
+    return json.dumps(
+        {"ok": False, "error_category": category, "error": reason, **details}
+    )
 
 
 def _parse_github_url(url: str) -> tuple[str, str] | None:
@@ -112,6 +116,23 @@ _META_TAG_RE = re.compile(r"<meta\b[^>]*>", re.I)
 _META_KEY_RE = re.compile(r"""(?:property|name)=["']([^"']+)["']""", re.I)
 _META_CONTENT_RE = re.compile(r"""content=["']([^"']*)["']""", re.I)
 _PROJECT_TAG_RE = re.compile(r"project-show__tag--([a-z0-9_-]+)", re.I)
+_DEVLOG_URL_RE = re.compile(r"/projects/\d+/devlogs/(\d+)")
+_VOID_TAGS = {
+    "area",
+    "base",
+    "br",
+    "col",
+    "embed",
+    "hr",
+    "img",
+    "input",
+    "link",
+    "meta",
+    "param",
+    "source",
+    "track",
+    "wbr",
+}
 
 
 def _extract_meta(markup: str) -> dict[str, str]:
@@ -135,6 +156,223 @@ def _extract_meta(markup: str) -> dict[str, str]:
     if badge := _PROJECT_TAG_RE.search(markup):
         fields["project_type"] = badge.group(1).lower()
     return fields
+
+
+class _StardanceParser(HTMLParser):
+    """Extract useful project evidence without flattening duplicated page chrome."""
+
+    def __init__(
+        self, *, forced_devlog_id: str | None = None, forced_devlog_url: str | None = None
+    ) -> None:
+        super().__init__(convert_charrefs=True)
+        self.depth = 0
+        self.banner_url: str | None = None
+        self.stats: dict[str, str] = {}
+        self.devlogs: dict[str, dict[str, Any]] = {}
+        self._capture: tuple[str, int, list[str]] | None = None
+        self._pending_stat: str | None = None
+        self._devlog: dict[str, Any] | None = None
+        self._devlog_depth: int | None = None
+        self._devlog_body_depth: int | None = None
+        self._skip_depth: int | None = None
+        self._forced_devlog_id = forced_devlog_id
+        self._forced_devlog_url = forced_devlog_url
+
+    @staticmethod
+    def _attrs(attrs: list[tuple[str, str | None]]) -> dict[str, str]:
+        return {name: value or "" for name, value in attrs}
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        data = self._attrs(attrs)
+        classes = set(data.get("class", "").split())
+        start_depth = self.depth
+
+        if tag in {"script", "style", "noscript", "svg", "template"}:
+            self._skip_depth = start_depth
+
+        if tag == "img" and "project-show__banner-image" in classes:
+            self.banner_url = data.get("src") or self.banner_url
+
+        capture_name = None
+        if "project-show__stats-num" in classes:
+            capture_name = "stat_num"
+        elif "project-show__stats-label" in classes:
+            capture_name = "stat_label"
+        elif "project-show__description" in classes:
+            capture_name = "description"
+        if capture_name and self._capture is None:
+            self._capture = (capture_name, start_depth, [])
+
+        devlog_url = data.get("data-card-link-url-value", "")
+        devlog_match = _DEVLOG_URL_RE.search(devlog_url)
+        is_devlog = data.get("data-feed-engagement-post-type-value") == "Post::Devlog"
+        is_forced_primary = (
+            self._forced_devlog_id is not None
+            and "feed-post-card" in classes
+            and "feed-post-card--compact" not in classes
+            and "feed-post-card__repost-preview" not in classes
+        )
+        if self._devlog is None and (is_devlog or devlog_match or is_forced_primary):
+            if not devlog_match:
+                devlog_match = _DEVLOG_URL_RE.search(data.get("href", ""))
+            devlog_id = devlog_match.group(1) if devlog_match else self._forced_devlog_id
+            if devlog_id:
+                self._devlog = {
+                    "id": devlog_id,
+                    "url": (
+                        urljoin("https://stardance.hackclub.com", devlog_url)
+                        if devlog_url
+                        else self._forced_devlog_url
+                    ),
+                    "created_at": None,
+                    "text_parts": [],
+                    "media": [],
+                }
+                self._devlog_depth = start_depth
+
+        if self._devlog is not None and "feed-post-card__body" in classes:
+            self._devlog_body_depth = start_depth
+
+        if self._devlog is not None:
+            if tag == "time" and data.get("datetime") and not self._devlog["created_at"]:
+                self._devlog["created_at"] = data["datetime"]
+            if (
+                tag in {"img", "video"}
+                and classes.intersection({"feed-post-card__image", "feed-post-card__video"})
+            ):
+                media_url = data.get("src")
+                if media_url:
+                    media = {
+                        "type": "video" if tag in {"video", "source"} else "image",
+                        "url": urljoin("https://stardance.hackclub.com", media_url),
+                    }
+                    if data.get("alt"):
+                        media["alt"] = data["alt"]
+                    if media not in self._devlog["media"]:
+                        self._devlog["media"].append(media)
+
+        if tag not in _VOID_TAGS:
+            self.depth += 1
+
+    def handle_data(self, data: str) -> None:
+        if self._skip_depth is not None:
+            return
+        cleaned = re.sub(r"\s+", " ", data).strip()
+        if not cleaned:
+            return
+        if self._capture is not None:
+            self._capture[2].append(cleaned)
+        if self._devlog is not None and self._devlog_body_depth is not None:
+            self._devlog["text_parts"].append(cleaned)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag not in _VOID_TAGS:
+            self.depth = max(0, self.depth - 1)
+
+        if self._skip_depth is not None and self.depth == self._skip_depth:
+            self._skip_depth = None
+
+        if self._capture is not None and self.depth == self._capture[1]:
+            name, _, parts = self._capture
+            value = " ".join(parts).strip()
+            if name == "stat_num":
+                self._pending_stat = value
+            elif name == "stat_label" and self._pending_stat:
+                self.stats[value.lower()] = self._pending_stat
+                self._pending_stat = None
+            self._capture = None
+
+        if self._devlog_body_depth is not None and self.depth == self._devlog_body_depth:
+            self._devlog_body_depth = None
+
+        if (
+            self._devlog is not None
+            and self._devlog_depth is not None
+            and self.depth == self._devlog_depth
+        ):
+            item = self._devlog
+            text = re.sub(r"\s+", " ", " ".join(item.pop("text_parts"))).strip()
+            # Controls and duplicated responsive cards can be noisy; keep each
+            # devlog bounded while preserving its date and media separately.
+            item["text"] = _truncate(text, 2000)
+            item["media_count"] = len(item["media"])
+            item["media"] = item["media"][:8]
+            previous = self.devlogs.get(item["id"])
+            if previous is None or len(item["text"]) > len(previous.get("text", "")):
+                self.devlogs[item["id"]] = item
+            self._devlog = None
+            self._devlog_depth = None
+            self._devlog_body_depth = None
+
+
+def _as_number(value: str | None) -> int | float | None:
+    if not value:
+        return None
+    cleaned = value.replace(",", "").strip()
+    try:
+        number = float(cleaned)
+    except ValueError:
+        return None
+    return int(number) if number.is_integer() else number
+
+
+def _bounded_devlogs(devlogs: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
+    """Keep newest and oldest history when a large project must be bounded."""
+    if len(devlogs) <= limit:
+        return devlogs
+    if limit == 1:
+        return devlogs[:1]
+    newest_count = (limit + 1) // 2
+    oldest_count = limit - newest_count
+    return devlogs[:newest_count] + devlogs[-oldest_count:]
+
+
+def _extract_stardance_project(markup: str, *, max_devlogs: int = 50) -> dict[str, Any]:
+    parser = _StardanceParser()
+    parser.feed(markup)
+    meta = _extract_meta(markup)
+    canonical_url = meta.get("canonical_url")
+    canonical_path = urlparse(canonical_url).path if canonical_url else ""
+    project_match = re.fullmatch(r"/projects/(\d+)", canonical_path.rstrip("/"))
+    devlogs = sorted(
+        parser.devlogs.values(), key=lambda item: item.get("created_at") or "", reverse=True
+    )
+    total = int(_as_number(parser.stats.get("devlogs")) or len(devlogs))
+    selected = _bounded_devlogs(devlogs, max(1, min(max_devlogs, 100)))
+    summary = {
+        "project_id": project_match.group(1) if project_match else None,
+        "canonical_url": canonical_url,
+        "title": meta.get("title"),
+        "author": meta.get("author"),
+        "description": meta.get("description"),
+        "image": meta.get("image"),
+        "banner_url": parser.banner_url,
+        "banner_is_default": (
+            "default-banner" in parser.banner_url if parser.banner_url else None
+        ),
+        "devlog_count": total,
+        "total_hours": _as_number(parser.stats.get("total hours")),
+    }
+    return {
+        "summary": {key: value for key, value in summary.items() if value is not None},
+        "devlogs": selected,
+        "completeness": {
+            "total_devlogs": total,
+            "parsed_devlogs": len(devlogs),
+            "returned_devlogs": len(selected),
+            "truncated": len(selected) < len(devlogs),
+            "selection": "newest_and_oldest" if len(selected) < len(devlogs) else "all",
+        },
+        "fallback_text": _truncate(_strip_html(markup), 20000) if not devlogs else None,
+    }
+
+
+def _extract_stardance_devlog_page(
+    markup: str, *, devlog_id: str, devlog_url: str
+) -> dict[str, Any] | None:
+    parser = _StardanceParser(forced_devlog_id=devlog_id, forced_devlog_url=devlog_url)
+    parser.feed(markup)
+    return parser.devlogs.get(devlog_id)
 
 
 def _truncate(text: str, limit: int) -> str:
@@ -266,6 +504,7 @@ class ReviewTools:
             self.fetch_page_text,
             self.render_page,
             self.fetch_stardance_project,
+            self.fetch_stardance_devlog,
             self.check_package,
             self.web_search,
         ]
@@ -664,8 +903,30 @@ class ReviewTools:
         except Exception as e:
             return _err(f"Render failed: {e}")
 
-    async def fetch_stardance_project(self, project_url: str) -> str:
-        """Fetch a Stardance project/ship page: structured meta + visible text.
+    async def _get_stardance(self, url: str) -> httpx.Response:
+        """Follow same-origin redirects without ever forwarding the session elsewhere."""
+        current = url
+        cookie = (
+            f"{STARDANCE_COOKIE_NAME}={self._stardance_session}"
+            if self._stardance_session
+            else None
+        )
+        for _ in range(6):
+            parsed = urlparse(current)
+            if parsed.scheme != "https" or parsed.hostname != "stardance.hackclub.com":
+                raise ValueError("Stardance requests and redirects must stay on the HTTPS host")
+            headers = {"cookie": cookie} if cookie else None
+            response = await self._web.get(current, headers=headers, follow_redirects=False)
+            if not response.is_redirect:
+                return response
+            location = response.headers.get("location")
+            if not location:
+                return response
+            current = urljoin(current, location)
+        raise RuntimeError("too many Stardance redirects")
+
+    async def fetch_stardance_project(self, project_url: str, max_devlogs: int = 50) -> str:
+        """Fetch structured Stardance project summary and deduplicated devlogs.
 
         Usually pre-fetched into the packet ("Stardance ship page") — call when
         the packet lacks it, you doubt the pre-fetched copy, or you need a page
@@ -677,27 +938,28 @@ class ReviewTools:
         ``/projects/{id}`` URLs also work but the cert's external_id is the *ship*
         id, not a project id, so never construct a /projects/ URL from it.
 
-        Returns ``meta`` (title, author, project_type, and the canonical
-        "N devlogs · M hours worked" description from the OG tags) plus the
-        stripped devlog text. Fallback only — the packet's
-        ai_declaration/updated_project fields are authoritative when present.
+        Returns canonical project identity, author/description, total hours,
+        devlog count, banner state, and dated devlogs with bounded text and media.
+        Responsive duplicates are removed by devlog id. For very large projects,
+        the returned selection preserves both newest and oldest history.
 
         A redirect to the site root is reported as an error
         (``redirected_away: true``) instead of silently returning the homepage:
         it means the login cookie is missing/expired, or the project was removed
         (e.g. banned for fraud) — a review signal worth flagging.
         """
-        if not project_url or "stardance.hackclub.com" not in project_url:
-            return _err(f"Not a Stardance URL: {project_url}")
-        cookies = (
-            {STARDANCE_COOKIE_NAME: self._stardance_session}
-            if self._stardance_session
-            else None
-        )
+        parsed = urlparse(project_url)
+        if parsed.scheme != "https" or parsed.hostname != "stardance.hackclub.com":
+            return _err(f"Not a Stardance URL: {project_url}", category="invalid_input")
+        max_devlogs = max(1, min(max_devlogs, 100))
         try:
-            r = await self._web.get(project_url, cookies=cookies)
+            r = await self._get_stardance(project_url)
             if r.status_code >= 400:
-                return _err(f"HTTP {r.status_code} fetching Stardance project")
+                return _err(
+                    f"HTTP {r.status_code} fetching Stardance project",
+                    category="upstream_http",
+                    status_code=r.status_code,
+                )
             final_url = str(r.url)
             # An unauthenticated / removed page bounces to the site root ("" or "/").
             if not urlparse(final_url).path.strip("/"):
@@ -711,6 +973,7 @@ class ReviewTools:
                 return json.dumps(
                     {
                         "ok": False,
+                        "error_category": "authentication_or_removed",
                         "redirected_away": True,
                         "authenticated": authed,
                         "url": project_url,
@@ -722,17 +985,62 @@ class ReviewTools:
                         ),
                     }
                 )
+            extracted = _extract_stardance_project(r.text, max_devlogs=max_devlogs)
             return json.dumps(
                 {
                     "ok": True,
+                    "source": "stardance_html",
+                    "retrieved_at": datetime.now(UTC).isoformat(),
                     "url": project_url,
                     "final_url": final_url,
-                    "meta": _extract_meta(r.text) or None,
-                    "text": _truncate(_strip_html(r.text), 20000),
+                    **extracted,
                 }
             )
         except Exception as e:
-            return _err(f"Failed to fetch Stardance project: {e}")
+            return _err(f"Failed to fetch Stardance project: {e}", category="request_failed")
+
+    async def fetch_stardance_devlog(self, devlog_url: str) -> str:
+        """Fetch one Stardance devlog for deeper dated text/media evidence.
+
+        Use a devlog URL returned by ``fetch_stardance_project``. The same
+        authenticated, same-origin redirect restrictions apply.
+        """
+        parsed = urlparse(devlog_url)
+        if (
+            parsed.scheme != "https"
+            or parsed.hostname != "stardance.hackclub.com"
+            or not _DEVLOG_URL_RE.search(parsed.path)
+        ):
+            return _err(f"Not a Stardance devlog URL: {devlog_url}", category="invalid_input")
+        try:
+            response = await self._get_stardance(devlog_url)
+            if response.status_code >= 400:
+                return _err(
+                    f"HTTP {response.status_code} fetching Stardance devlog",
+                    category="upstream_http",
+                    status_code=response.status_code,
+                )
+            match = _DEVLOG_URL_RE.search(parsed.path)
+            assert match is not None
+            devlog_id = match.group(1)
+            devlog = _extract_stardance_devlog_page(
+                response.text, devlog_id=devlog_id, devlog_url=devlog_url
+            )
+            return json.dumps(
+                {
+                    "ok": True,
+                    "source": "stardance_html",
+                    "retrieved_at": datetime.now(UTC).isoformat(),
+                    "url": devlog_url,
+                    "final_url": str(response.url),
+                    "devlog": devlog,
+                    "fallback_text": (
+                        None if devlog else _truncate(_strip_html(response.text), 12000)
+                    ),
+                }
+            )
+        except Exception as e:
+            return _err(f"Failed to fetch Stardance devlog: {e}", category="request_failed")
 
     async def check_package(self, url: str) -> str:
         """Verify a published package on npm, PyPI, or crates.io.

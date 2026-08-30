@@ -7,6 +7,9 @@ sw-reviewer/
 .env.*
 !.env.example
 
+# Browser network captures can contain live sessions and personal data
+har/
+
 # Python
 __pycache__/
 *.pyc

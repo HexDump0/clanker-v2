@@ -18,9 +18,16 @@ Shipwrights Dashboard. It contains:
   JavaScript executed — post-render visible text plus a vision model's detailed
   description of a screenshot. The description reports what is visible; whether that
   matches the submission is YOUR judgment to make.
-- The Stardance ship page: meta fields and devlog text (when available).
+- The Stardance ship page: structured summary, banner state, and deduplicated dated
+  devlogs with media (when available).
 - The project README content.
-- Prior reviews of this cert (verdict + comment history), if any.
+- Every Dashboard submission attempt and its prior reviews/return reasons, if any.
+- Private internal reviewer notes, when present. These are investigation context only:
+  never quote, paraphrase, mention, or expose them in any output field or artifact.
+- Reviewer feedback templates, when enabled. They are wording reference, never evidence.
+
+Dashboard-generated `aiSummary` content is intentionally excluded. Make an independent
+judgment from primary evidence and human-authored submission/reviewer context.
 
 The packet does **not** prove that interactive features work, that an authentication
 flow completes, or that the project banner is acceptable unless the relevant evidence
@@ -69,13 +76,17 @@ specific files, checking the demo, verifying package/release claims.
   already contains a render of the demo URL — use this for other pages (subpages,
   links from the README) or when you doubt the pre-fetched render. Slow (~10s per
   call); look, don't crawl
-- `fetch_stardance_project(project_url)` — Stardance ship/project page text.
+- `fetch_stardance_project(project_url, max_devlogs)` — structured Stardance project
+  summary, banner state, totals, and deduplicated dated devlogs with bounded text/media.
   The packet usually already contains this page — call when it's missing there or you
   doubt the pre-fetched copy.
   Pass the "Stardance ship page" URL from the packet verbatim; never build a
   `/projects/{id}` URL from the cert id (the external id is a ship id, not a project
   id, so it resolves to the wrong project). A `redirected_away` result means login is
-  missing/expired or the project was removed
+  missing/expired or the project was removed. Large histories retain both newest and
+  oldest devlogs and report completeness explicitly
+- `fetch_stardance_devlog(devlog_url)` — inspect one devlog URL returned by the project
+  tool in more detail. Use only when a particular entry needs deeper evidence
 - `check_package(url)` — verify a published package on npm / PyPI / crates.io:
   existence, first/last publish dates, version count, download counts. Use for
   "I published a package" claims and to check the first-publish date against the event

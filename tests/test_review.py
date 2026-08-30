@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import shutil
+from pathlib import Path
 
 import httpx
 import pytest
@@ -26,7 +27,8 @@ from clanker.review.models import (
 )
 from clanker.review.packet import build_packet
 from clanker.review.pdf import generate_review_pdf
-from clanker.review.tools import ReviewTools
+from clanker.review.runner import PrivateContextLeakError, _guard_private_context
+from clanker.review.tools import ReviewTools, _extract_stardance_project
 from clanker.review.vision import PageRenderer
 from tests.conftest import make_cert
 
@@ -79,6 +81,28 @@ async def test_build_packet_prompt(client, dashboard):
     assert "Used Copilot for boilerplate" in prompt
     assert "REJECTED: README too thin" in prompt
     assert "# Hi" in prompt  # cached README included
+
+
+async def test_packet_includes_attempts_notes_templates_but_not_ai_summary(client, dashboard):
+    private_note = "Investigate the unusual ownership evidence before deciding."
+    fixture = Path(__file__).parent / "fixtures" / "dashboard_cert_detail.json"
+    dashboard.details["c1"] = json.loads(fixture.read_text(encoding="utf-8"))
+    dashboard.feedback_templates["shared"] = [
+        {"id": "t1", "title": "Functionality", "body": "Explain the broken feature."}
+    ]
+
+    packet = await build_packet(client, "c1")
+    prompt = packet.to_prompt()
+
+    assert private_note in prompt
+    assert packet.private_context == [private_note]
+    assert "Submission attempts and review history" in prompt
+    assert "The primary feature did not work" in prompt
+    assert "Resubmit with the missing functionality" in prompt
+    assert "Explain the broken feature" in prompt
+    assert "Dashboard AI says reject immediately" not in prompt
+    assert "ai_summary" not in packet.cert.model_dump()
+    assert "aiSummary" not in packet.cert.model_dump(by_alias=True)
 
 
 async def test_build_packet_prefetches_tree_languages_and_stardance(client, dashboard):
@@ -169,8 +193,123 @@ async def test_stardance_fetch_sends_current_cookie_name(configured_cookie):
         )
     )
     assert payload["ok"] is True
-    assert payload["meta"]["title"] == "Ship"
+    assert payload["summary"]["title"] == "Ship"
     await tools.aclose()
+
+
+def test_stardance_parser_returns_structured_deduplicated_history():
+    def card(devlog_id: str, created_at: str, text: str) -> str:
+        return (
+            '<div data-feed-engagement-post-type-value="Post::Devlog" '
+            f'data-card-link-url-value="/projects/42/devlogs/{devlog_id}">'
+            f'<time datetime="{created_at}"></time>'
+            f'<div class="feed-post-card__body markdown-content">{text}</div>'
+            '<img class="feed-post-card__avatar" src="/avatar.png">'
+            f'<img class="feed-post-card__image" src="/media/{devlog_id}.png">'
+            "</div>"
+        )
+
+    html = (
+        '<meta property="og:title" content="Project by @maker | Stardance">'
+        '<meta property="og:url" content="https://stardance.hackclub.com/projects/42">'
+        '<meta name="author" content="maker">'
+        '<img class="project-show__banner-image" src="/assets/profile/default-banner.png">'
+        '<strong class="project-show__stats-num">3</strong>'
+        '<span class="project-show__stats-label">Devlogs</span>'
+        '<strong class="project-show__stats-num">12.5</strong>'
+        '<span class="project-show__stats-label">Total hours</span>'
+        + card("3", "2026-08-03T00:00:00Z", "Newest")
+        + card("2", "2026-08-02T00:00:00Z", "Middle")
+        + card("1", "2026-08-01T00:00:00Z", "Oldest")
+        + card("3", "2026-08-03T00:00:00Z", "Newest")
+    )
+
+    data = _extract_stardance_project(html, max_devlogs=2)
+    assert data["summary"]["project_id"] == "42"
+    assert data["summary"]["banner_is_default"] is True
+    assert data["summary"]["total_hours"] == 12.5
+    assert [item["id"] for item in data["devlogs"]] == ["3", "1"]
+    assert data["devlogs"][0]["media"] == [
+        {"type": "image", "url": "https://stardance.hackclub.com/media/3.png"}
+    ]
+    assert data["completeness"] == {
+        "total_devlogs": 3,
+        "parsed_devlogs": 3,
+        "returned_devlogs": 2,
+        "truncated": True,
+        "selection": "newest_and_oldest",
+    }
+
+
+async def test_stardance_rejects_lookalike_host():
+    tools = ReviewTools(stardance_session="secret")
+    payload = json.loads(
+        await tools.fetch_stardance_project("https://stardance.hackclub.com.evil.test/project")
+    )
+    assert payload["ok"] is False
+    assert "Not a Stardance URL" in payload["error"]
+    await tools.aclose()
+
+
+async def test_stardance_cookie_never_follows_cross_origin_redirect():
+    requests = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(302, headers={"location": "https://evil.test/steal"})
+
+    tools = ReviewTools(stardance_session="secret")
+    tools._web = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    payload = json.loads(
+        await tools.fetch_stardance_project(
+            "https://stardance.hackclub.com/admin/certification/ship/123"
+        )
+    )
+    assert payload["ok"] is False
+    assert payload["error_category"] == "request_failed"
+    assert len(requests) == 1
+    assert requests[0].headers["cookie"] == "_stardance_session_4=secret"
+    await tools.aclose()
+
+
+async def test_fetch_one_stardance_devlog():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            text=(
+                '<div data-feed-engagement-post-type-value="Post::Devlog" '
+                'data-card-link-url-value="/projects/42/devlogs/7">'
+                '<time datetime="2026-08-01T00:00:00Z"></time>'
+                '<div class="feed-post-card__body">Built the launch flow.</div>'
+                '<video class="feed-post-card__video" src="/launch.mp4"></video>'
+                "</div>"
+            ),
+        )
+
+    tools = ReviewTools(stardance_session="secret")
+    tools._web = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    payload = json.loads(
+        await tools.fetch_stardance_devlog(
+            "https://stardance.hackclub.com/projects/42/devlogs/7"
+        )
+    )
+    assert payload["ok"] is True
+    assert payload["devlog"]["id"] == "7"
+    assert payload["devlog"]["text"] == "Built the launch flow."
+    assert payload["devlog"]["media"][0]["type"] == "video"
+    await tools.aclose()
+
+
+def test_private_note_guard_blocks_verbatim_public_output():
+    note = "Investigate private authorship evidence before approving this project."
+    review = make_review(reasoning=f"The internal note said: {note}")
+    with pytest.raises(PrivateContextLeakError):
+        _guard_private_context(review, [note])
+
+
+def test_private_note_guard_allows_independent_public_evidence():
+    review = make_review(reasoning="The repository and live demo satisfy every check.")
+    _guard_private_context(review, ["Investigate private authorship evidence before approval."])
 
 
 @pytest.mark.parametrize(
