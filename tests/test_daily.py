@@ -132,7 +132,7 @@ async def test_announce_daily_summary_embed():
     kwargs = slack.chat_postMessage.call_args.kwargs
     blob = json.dumps(kwargs["attachments"])
     assert "Daily Queue Stats" in blob
-    assert "hello humans :hello:" in blob
+    assert "Hello meatbags :hello:" in blob
     assert "- 7 projects currently pending." in blob
     assert "- 3 projects have entered the 5d era." in blob
     assert "- 11 projects reviewed today." in blob
