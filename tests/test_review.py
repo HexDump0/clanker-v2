@@ -499,6 +499,20 @@ def test_review_and_chat_prompts_include_current_shipwright_rules():
     assert "Models made in Tinkercad" not in review
 
 
+def test_chat_prompt_handles_vibe_coder_cases_internally():
+    chat = build_chat_instructions()
+
+    assert "private Shipwrights help threads" in chat
+    assert "speaking to Shipwrights staff" in chat
+    assert "strictly forbidden from using that protocol" in chat
+    assert "Never send, simulate," in chat
+    assert "shipper-facing message with the `?<message>` syntax" in chat
+    assert "DRAFT FOR HUMAN TO SEND" in chat
+    assert "Keep that hostility completely out of every shipper-facing draft" in chat
+    assert "Never compare commit author names or emails" in chat
+    assert "Do not invoke `run_review` automatically" in chat
+
+
 def make_settings(**overrides) -> Settings:
     # _env_file=None keeps the developer's real .env out of the test.
     return Settings(
