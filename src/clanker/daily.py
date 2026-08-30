@@ -24,7 +24,7 @@ from pathlib import Path
 from pydantic_ai import Agent
 
 from clanker.config import Settings
-from clanker.llm import build_model
+from clanker.llm import build_model, build_routing_model_settings
 from clanker.shipwrights import CertStatus, CertSummary, LeaderboardEntry, ShipwrightsClient
 
 logger = logging.getLogger(__name__)
@@ -143,7 +143,11 @@ async def generate_praise(settings: Settings, stats: DailyStats) -> str:
         f"- Workplace-wide: {stats.reviewed_today} ships reviewed today\n\n"
         "Write the praise line for the daily summary now."
     )
-    agent: Agent[None, str] = Agent(build_model(settings), instructions=_praise_prompt())
+    agent: Agent[None, str] = Agent(
+        build_model(settings),
+        instructions=_praise_prompt(),
+        model_settings=build_routing_model_settings(settings),
+    )
     result = await asyncio.wait_for(agent.run(context), timeout=settings.agent_timeout)
     praise = str(result.output).strip().strip('"').strip()
     if not praise:

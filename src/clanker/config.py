@@ -69,18 +69,40 @@ class Settings(BaseSettings):
     ai_provider: Literal["openrouter", "hackclub"] = "openrouter"
     openrouter_api_key: str = ""
     hackclub_api_key: str = ""
-    model_name: str = "xiaomi/mimo-v2.5-pro"
+    model_name: str = "deepseek/deepseek-v4-flash-0731"
     openrouter_provider_only: str = Field(
         default="",
         description=(
             "Comma-separated OpenRouter provider slugs to pin routing to "
             "(e.g. 'alibaba'). Empty = let OpenRouter route freely. "
-            "Only honored when ai_provider=openrouter."
+            "Supported by direct OpenRouter and the Hack Club AI proxy."
         ),
     )
     openrouter_allow_fallbacks: bool = Field(
-        default=False,
+        default=True,
         description="With a provider pin, whether OpenRouter may fall back to others.",
+    )
+    provider_sort: Literal["price", "throughput", "latency"] = Field(
+        default="throughput",
+        description=(
+            "Dynamic upstream-provider priority for OpenRouter-compatible gateways. "
+            "No provider name is pinned when OPENROUTER_PROVIDER_ONLY is empty."
+        ),
+    )
+    provider_preferred_max_latency: float = Field(
+        default=2.0,
+        gt=0,
+        description="Soft preferred p50 provider latency in seconds.",
+    )
+    provider_max_prompt_price: float = Field(
+        default=0.5,
+        gt=0,
+        description="Hard maximum provider prompt price in USD per million tokens.",
+    )
+    provider_max_completion_price: float = Field(
+        default=1.0,
+        gt=0,
+        description="Hard maximum provider completion price in USD per million tokens.",
     )
     reasoning_effort: Literal["low", "medium", "high"] = "medium"
     agent_timeout: float = 120.0
@@ -94,7 +116,7 @@ class Settings(BaseSettings):
         ),
     )
     vision_model_name: str = Field(
-        default="qwen/qwen3-vl-8b-thinking",
+        default="qwen/qwen3.8-flash",
         description="Vision model that describes rendered page screenshots.",
     )
     video_director_model_name: str = Field(
@@ -108,7 +130,8 @@ class Settings(BaseSettings):
         description=(
             "Comma-separated OpenRouter provider slugs used only for the video "
             "director model. Empty = let OpenRouter route the director freely; "
-            "the review agent's OPENROUTER_PROVIDER_ONLY setting is not inherited."
+            "the review agent's OPENROUTER_PROVIDER_ONLY setting is not inherited. "
+            "Supported by direct OpenRouter and the Hack Club AI proxy."
         ),
     )
     video_director_allow_fallbacks: bool = Field(

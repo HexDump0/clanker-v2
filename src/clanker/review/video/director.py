@@ -15,7 +15,7 @@ from pydantic_ai import Agent, BinaryContent, PromptedOutput
 from pydantic_ai.models.openrouter import OpenRouterModelSettings
 
 from clanker.config import Settings
-from clanker.llm import build_model
+from clanker.llm import build_model, build_routing_model_settings
 from clanker.review.models import VideoEvidence
 from clanker.review.video.models import EvidenceCapture, VideoPlan, VideoProject
 
@@ -63,13 +63,11 @@ class Director(Protocol):
 
 
 def build_director_model_settings(settings: Settings) -> OpenRouterModelSettings:
-    model_settings = OpenRouterModelSettings(timeout=settings.agent_timeout)
-    if settings.video_director_provider_pins and settings.ai_provider == "openrouter":
-        model_settings["openrouter_provider"] = {
-            "only": settings.video_director_provider_pins,
-            "allow_fallbacks": settings.video_director_allow_fallbacks,
-        }
-    return model_settings
+    return build_routing_model_settings(
+        settings,
+        pins=settings.video_director_provider_pins,
+        allow_fallbacks=settings.video_director_allow_fallbacks,
+    )
 
 
 def create_director_agent(settings: Settings) -> Agent[None, VideoPlan]:

@@ -79,14 +79,20 @@ def test_director_uses_its_own_openrouter_provider_pin():
     }
 
 
-def test_director_does_not_inherit_review_provider_pin():
+def test_director_does_not_inherit_review_provider_pin_and_routes_dynamically():
     settings = Settings(
         _env_file=None,
         ai_provider="openrouter",
         openrouter_provider_only="alibaba",
     )
 
-    assert "openrouter_provider" not in build_director_model_settings(settings)
+    assert build_director_model_settings(settings)["openrouter_provider"] == {
+        "sort": "throughput",
+        "preferred_max_latency": 2.0,
+        "max_price": {"prompt": 0.5, "completion": 1.0},
+        "require_parameters": True,
+        "allow_fallbacks": True,
+    }
 
 
 def make_plan(highlight_text: str | None = "This is not the web page you are looking for"):

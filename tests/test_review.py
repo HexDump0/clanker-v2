@@ -29,7 +29,7 @@ from clanker.review.packet import build_packet
 from clanker.review.pdf import generate_review_pdf
 from clanker.review.runner import PrivateContextLeakError, _guard_private_context
 from clanker.review.tools import ReviewTools, _extract_stardance_project
-from clanker.review.vision import PageRenderer
+from clanker.review.vision import PageRenderer, build_vision_model_settings
 from tests.conftest import make_cert
 
 
@@ -510,20 +510,45 @@ def make_settings(**overrides) -> Settings:
     )
 
 
-def test_provider_pin_only_for_openrouter():
-    pinned = build_model_settings(make_settings(openrouter_provider_only="alibaba, cerebras"))
+def test_default_review_and_vision_models_are_current():
+    settings = make_settings()
+    assert settings.model_name == "deepseek/deepseek-v4-flash-0731"
+    assert settings.vision_model_name == "qwen/qwen3.8-flash"
+
+
+def test_vision_disables_reasoning_and_uses_dynamic_routing():
+    settings = build_vision_model_settings(make_settings())
+    assert settings["openrouter_reasoning"] == {"enabled": False}
+    assert settings["openrouter_provider"]["sort"] == "throughput"
+
+
+def test_dynamic_provider_routing_applies_to_openrouter_and_hackclub():
+    expected = {
+        "sort": "throughput",
+        "preferred_max_latency": 2.0,
+        "max_price": {"prompt": 0.5, "completion": 1.0},
+        "require_parameters": True,
+        "allow_fallbacks": True,
+    }
+
+    unpinned = build_model_settings(make_settings())
+    assert unpinned["openrouter_provider"] == expected
+
+    hackclub = build_model_settings(make_settings(ai_provider="hackclub"))
+    assert hackclub["openrouter_provider"] == expected
+
+
+def test_explicit_provider_pin_remains_available_as_an_override():
+    pinned = build_model_settings(
+        make_settings(
+            openrouter_provider_only="alibaba, cerebras",
+            openrouter_allow_fallbacks=False,
+        )
+    )
     assert pinned["openrouter_provider"] == {
         "only": ["alibaba", "cerebras"],
         "allow_fallbacks": False,
     }
-
-    unpinned = build_model_settings(make_settings())
-    assert "openrouter_provider" not in unpinned
-
-    hackclub = build_model_settings(
-        make_settings(ai_provider="hackclub", openrouter_provider_only="alibaba")
-    )
-    assert "openrouter_provider" not in hackclub
 
 
 async def test_review_agent_uses_prompted_output_and_keeps_tools_optional():

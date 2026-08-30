@@ -14,10 +14,9 @@ import logging
 from typing import Any
 
 from pydantic_ai import Agent, BinaryContent
-from pydantic_ai.models.openrouter import OpenRouterModelSettings
 
 from clanker.config import Settings
-from clanker.llm import build_model
+from clanker.llm import build_model, build_routing_model_settings
 from clanker.review.browser import render_page
 
 logger = logging.getLogger(__name__)
@@ -33,11 +32,20 @@ what is visible; do not judge whether the site or app works correctly.
 """
 
 
+def build_vision_model_settings(settings: Settings):
+    model_settings = build_routing_model_settings(settings)
+    # Screenshot description is a bounded perception task. Qwen3.8 Flash enables
+    # reasoning by default, which adds latency and can consume the output before
+    # producing the factual description we need.
+    model_settings["openrouter_reasoning"] = {"enabled": False}
+    return model_settings
+
+
 def create_vision_agent(settings: Settings) -> Agent:
     return Agent(
         build_model(settings, settings.vision_model_name),
         instructions=VISION_INSTRUCTIONS,
-        model_settings=OpenRouterModelSettings(timeout=settings.agent_timeout),
+        model_settings=build_vision_model_settings(settings),
     )
 
 

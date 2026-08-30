@@ -46,6 +46,11 @@ Its OpenRouter provider routing is configured independently from the review agen
 review-model provider pin must never be inherited by a director model that may only be
 served by a different provider.
 
+For unpinned workloads, provider selection is dynamic through the OpenRouter-compatible
+gateway (including Hack Club AI): prioritize current throughput, softly prefer reasonable
+latency, enforce configurable price ceilings and required-parameter support, and retain
+automatic provider fallbacks. Provider names are not hardcoded into this default policy.
+
 It returns a validated `VideoPlan`. It has no browser tools, cannot create URLs, cannot
 change the verdict or fixes, and cannot invent findings unsupported by `ReviewResult`.
 It controls editorial selection and wording, not navigation, selectors, coordinates,

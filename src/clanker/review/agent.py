@@ -18,7 +18,7 @@ from pydantic_ai import Agent, PromptedOutput
 from pydantic_ai.models.openrouter import OpenRouterModelSettings
 
 from clanker.config import Settings
-from clanker.llm import build_model
+from clanker.llm import build_model, build_routing_model_settings
 from clanker.review.models import ReviewOutput
 from clanker.review.tools import ReviewTools
 
@@ -43,17 +43,12 @@ def build_review_instructions() -> str:
 
 
 def build_model_settings(settings: Settings) -> OpenRouterModelSettings:
-    model_settings = OpenRouterModelSettings(
-        timeout=settings.agent_timeout,
-        openrouter_reasoning={"effort": settings.reasoning_effort},
+    model_settings = build_routing_model_settings(
+        settings,
+        pins=settings.provider_pins,
+        allow_fallbacks=settings.openrouter_allow_fallbacks,
     )
-    # Provider pinning (e.g. OPENROUTER_PROVIDER_ONLY=alibaba) — only meaningful
-    # when talking to OpenRouter directly.
-    if settings.provider_pins and settings.ai_provider == "openrouter":
-        model_settings["openrouter_provider"] = {
-            "only": settings.provider_pins,
-            "allow_fallbacks": settings.openrouter_allow_fallbacks,
-        }
+    model_settings["openrouter_reasoning"] = {"effort": settings.reasoning_effort}
     return model_settings
 
 
