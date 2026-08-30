@@ -4,6 +4,7 @@
     clanker show <cert-id>    full detail for one cert
     clanker watch             run the watcher only (logs new certs, no reviews)
     clanker review <cert-id>  run one full review (verdict + PDF, no Slack)
+    clanker daily             daily queue summary (print, or --post to Slack)
     clanker run               run everything: watcher + reviews + Slack
 """
 
@@ -112,6 +113,32 @@ async def cmd_run(settings: Settings, args: argparse.Namespace) -> None:
     await run_all(settings)
 
 
+async def cmd_daily(settings: Settings, args: argparse.Namespace) -> None:
+    from clanker.config import configure_observability
+    from clanker.daily import build_daily_summary, daily_fallback_text
+    from clanker.slack.announcer import Announcer
+
+    configure_observability(settings)
+    async with ShipwrightsClient.from_settings(settings) as sw:
+        stats = await build_daily_summary(sw, settings)
+        if not args.post:
+            print(daily_fallback_text(stats))
+            print(f"\nPraise: {stats.praise}")
+            return
+        settings.require_slack()
+        from slack_sdk.web.async_client import AsyncWebClient
+
+        announcer = Announcer(
+            AsyncWebClient(token=settings.slack_bot_token),
+            channel=settings.slack_channel,
+            dashboard_base_url=settings.shipwrights_base_url,
+            workplace=settings.shipwrights_workplace,
+            daily_ping=settings.slack_daily_ping,
+        )
+        await announcer.announce_daily_summary(stats)
+        print("Posted.")
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="clanker", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -146,6 +173,12 @@ def main(argv: list[str] | None = None) -> None:
 
     p_run = sub.add_parser("run", help="run all services (watcher + reviews + Slack)")
     p_run.set_defaults(func=cmd_run)
+
+    p_daily = sub.add_parser("daily", help="daily queue summary (default: print, --post to send)")
+    p_daily.add_argument(
+        "--post", action="store_true", help="post the summary to Slack instead of printing"
+    )
+    p_daily.set_defaults(func=cmd_daily)
 
     args = parser.parse_args(argv)
     logging.basicConfig(

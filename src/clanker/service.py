@@ -17,6 +17,7 @@ from datetime import UTC, datetime
 from slack_sdk.web.async_client import AsyncWebClient
 
 from clanker.config import Settings, configure_observability
+from clanker.daily import parse_daily_time, seconds_until_utc_time, send_daily_summary
 from clanker.review import ReviewRunner
 from clanker.review.agent import create_chat_agent, create_review_agent
 from clanker.review.tools import ReviewTools
@@ -74,6 +75,7 @@ def build_app(settings: Settings, *, with_slack: bool = True) -> AppContext:
             dashboard_base_url=settings.shipwrights_base_url,
             workplace=settings.shipwrights_workplace,
             ship_ping=settings.slack_ship_ping,
+            daily_ping=settings.slack_daily_ping,
         )
 
     return AppContext(
@@ -131,6 +133,23 @@ async def run_watcher_service(ctx: AppContext) -> None:
         aclose = getattr(source, "aclose", None)
         if aclose is not None:
             await aclose()
+
+
+async def run_daily_summary_service(ctx: AppContext) -> None:
+    """Post the daily queue summary once per day at DAILY_SUMMARY_TIME_UTC."""
+    assert ctx.announcer is not None
+    settings = ctx.settings
+    hour, minute = parse_daily_time(settings.daily_summary_time_utc)
+    while True:
+        delay = seconds_until_utc_time(hour, minute)
+        logger.info("Daily queue summary next post in %.0f s (%02d:%02d UTC)", delay, hour, minute)
+        await asyncio.sleep(delay)
+        try:
+            await send_daily_summary(ctx.client, ctx.announcer, settings)
+        except Exception:
+            # One failed digest must not kill the schedule; the supervisor
+            # restarts us anyway, but log loudly either way.
+            logger.exception("Daily queue summary failed")
 
 
 async def run_slack_service(ctx: AppContext) -> None:
@@ -267,6 +286,11 @@ async def run_all(settings: Settings) -> None:
         async with asyncio.TaskGroup() as tg:
             tg.create_task(_supervise("watcher", run_watcher_service, ctx), name="watcher")
             tg.create_task(_supervise("slack", run_slack_service, ctx), name="slack")
+            if settings.daily_summary_enabled:
+                tg.create_task(
+                    _supervise("daily-summary", run_daily_summary_service, ctx),
+                    name="daily-summary",
+                )
     finally:
         await ctx.client.close()
         await ctx.tools.aclose()

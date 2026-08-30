@@ -168,6 +168,22 @@ class Settings(BaseSettings):
             "other value is shown as literal text. Empty = no cc line."
         ),
     )
+    slack_daily_ping: str = Field(
+        default="",
+        description=(
+            "Who to 'cc' on the daily queue summary. Same format as "
+            "SLACK_SHIP_PING (usergroup 'S...', user 'U...'/'W...', or literal "
+            "text). Empty = no cc line."
+        ),
+    )
+    daily_summary_enabled: bool = Field(
+        default=True,
+        description="Post the daily queue summary to Slack at DAILY_SUMMARY_TIME_UTC.",
+    )
+    daily_summary_time_utc: str = Field(
+        default="23:30",
+        description="HH:MM UTC when the daily queue summary is posted.",
+    )
     chat_memory_file: Path = Field(
         default=Path("data/chat_memory.json"),
         description=(

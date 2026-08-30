@@ -17,6 +17,7 @@ from datetime import datetime
 
 from slack_sdk.web.async_client import AsyncWebClient
 
+from clanker.daily import DailyStats, daily_fallback_text
 from clanker.review import ReviewOutcome
 from clanker.review.models import ReviewVerdict
 from clanker.shipwrights import CertSummary
@@ -34,6 +35,7 @@ _STATUS_STYLE = {
     "DASH DOWN": ("#E01E5A", ":rotating_light:"),
 }
 _DEFAULT_STYLE = ("#8D8D8D", ":grey_question:")
+_DAILY_COLOR = "#6D28D9"
 
 _VERDICT_LABEL = {
     ReviewVerdict.APPROVE: "APPROVE",
@@ -60,12 +62,14 @@ class Announcer:
         dashboard_base_url: str,
         workplace: str,
         ship_ping: str = "",
+        daily_ping: str = "",
     ) -> None:
         self._slack = slack
         self._channel = channel
         self._dashboard_base_url = dashboard_base_url.rstrip("/")
         self._workplace = workplace
         self._ship_ping = ship_ping.strip()
+        self._daily_ping = daily_ping.strip()
 
     def _cert_link(self, cert_id: str) -> str:
         return f"{self._dashboard_base_url}/{self._workplace}/certifications/{cert_id}"
@@ -80,6 +84,25 @@ class Announcer:
         if ping[0] in ("U", "W"):  # user
             return f"<@{ping}>"
         return ping
+
+    def _daily_ping_mrkdwn(self) -> str | None:
+        ping = self._daily_ping
+        if not ping:
+            return None
+        if ping.startswith("S"):
+            return f"<!subteam^{ping}>"
+        if ping[0] in ("U", "W"):
+            return f"<@{ping}>"
+        return ping
+
+    @staticmethod
+    def _reviewer_ping(entry) -> str:
+        """Slack mention for a leaderboard entry (memberId is ``s:U...``)."""
+        member_id = entry.member_id or ""
+        slack_id = member_id.split(":", 1)[1] if ":" in member_id else member_id
+        if slack_id.startswith(("U", "W")):
+            return f"<@{slack_id}>"
+        return entry.name or entry.member_id or "nobody"
 
     @staticmethod
     def _submitted_mrkdwn(created_at: datetime | None) -> str:
@@ -173,6 +196,79 @@ class Announcer:
             )
         except Exception:
             logger.exception("Failed to send online announcement")
+
+    async def announce_daily_summary(self, stats: DailyStats) -> None:
+        """Post the 23:30 UTC queue digest as a single embed.
+
+        This message is standalone (nothing is ever threaded under it), so unlike
+        the ship announcements the cc ping can live inside the embed itself —
+        the mention fires exactly once.
+        """
+        blocks: list[dict] = [
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": (
+                        "*Daily Queue Stats*\n"
+                        "Hello meatbags :hello: , here's todays stats\n"
+                        f"- {stats.pending} projects currently pending.\n"
+                        f"- {stats.era5} projects have entered the 5d era.\n"
+                        f"- {stats.reviewed_today} projects reviewed today."
+                    ),
+                },
+            }
+        ]
+
+        if stats.oldest:
+            look = ["*Some projects you need to look at:*"]
+            for cert in stats.oldest:
+                ptype = cert.ai_type or cert.project_type or "?"
+                look.append(
+                    f"• <{self._cert_link(cert.id)}|{cert.project_name}> ({ptype})"
+                )
+            blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "\n".join(look)}})
+        else:
+            blocks.append(
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": "*Some projects you need to look at:*\nThe queue is "
+                        "empty. Statistically impossible. Enjoy it, meatbags.",
+                    },
+                }
+            )
+
+        if stats.best is not None:
+            best_text = (
+                f"And the best shipwright of today is {self._reviewer_ping(stats.best)} :yay2:"
+            )
+            if stats.praise:
+                best_text += f"\n{stats.praise}"
+            blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": best_text}})
+
+        if ping := self._daily_ping_mrkdwn():
+            blocks.append(
+                {"type": "context", "elements": [{"type": "mrkdwn", "text": f"cc: {ping}"}]}
+            )
+
+        try:
+            await self._slack.chat_postMessage(
+                channel=self._channel,
+                # No top-level `text`: with legacy attachments Slack renders it
+                # as a second message body above the embed. The attachment's
+                # own `fallback` covers notifications/unfurl clients.
+                attachments=[
+                    {
+                        "color": _DAILY_COLOR,
+                        "blocks": blocks,
+                        "fallback": daily_fallback_text(stats),
+                    }
+                ],
+            )
+        except Exception:
+            logger.exception("Failed to post the daily summary")
 
     async def announce_ship(self, cert: CertSummary) -> str:
         """Post the ping headline + a separate embed; returns the embed's ts.

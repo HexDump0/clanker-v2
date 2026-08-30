@@ -215,8 +215,12 @@ class ShipwrightsClient:
         page: int = 1,
         query: str | None = None,
         ai_type: str | None = None,
+        sort: str | None = None,
     ) -> CertificationPage:
-        """One page of certifications (the server returns ~50 per page)."""
+        """One page of certifications (the server returns ~50 per page).
+
+        ``sort`` is a comma-separated table sort such as ``date:asc``.
+        """
         params: dict[str, Any] = {"page": page}
         if status is not None:
             params["status"] = status.value
@@ -224,6 +228,8 @@ class ShipwrightsClient:
             params["q"] = query
         if ai_type:
             params["aiType"] = ai_type
+        if sort:
+            params["sort"] = sort
         data = await self._request("GET", self._wp("/certifications"), params=params)
         return CertificationPage.model_validate(data)
 

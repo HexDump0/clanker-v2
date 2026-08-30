@@ -40,6 +40,7 @@ class FakeDashboard:
             "mine": [],
             "reviewerSlackUsername": "reviewer",
         }
+        self.leaderboard: dict[str, Any] = {"entries": []}
 
     def set_pending(self, certs: list[dict[str, Any]], per_page: int = 50) -> None:
         self.pages = [certs[i : i + per_page] for i in range(0, len(certs), per_page)] or [[]]
@@ -66,6 +67,9 @@ class FakeDashboard:
 
         if path == f"{prefix}/feedback-templates" and request.method == "GET":
             return httpx.Response(200, json=self.feedback_templates)
+
+        if path == f"{prefix}/certifications/leaderboard" and request.method == "GET":
+            return httpx.Response(200, json=self.leaderboard)
 
         for cert_id, detail in self.details.items():
             if path == f"{prefix}/certifications/{cert_id}":
