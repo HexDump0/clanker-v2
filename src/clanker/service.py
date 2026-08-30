@@ -12,6 +12,7 @@ import asyncio
 import json
 import logging
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 from slack_sdk.web.async_client import AsyncWebClient
 
@@ -21,10 +22,10 @@ from clanker.review.agent import create_chat_agent, create_review_agent
 from clanker.review.tools import ReviewTools
 from clanker.review.video.director import VisionDirector
 from clanker.review.vision import PageRenderer
-from clanker.shipwrights import CertSummary, ShipwrightsClient
+from clanker.shipwrights import CertStatus, ShipwrightsClient
 from clanker.slack.announcer import Announcer
 from clanker.slack.memory import MemoryStore
-from clanker.watcher import Watcher
+from clanker.watcher import PendingEmission, Watcher, make_pending_source
 
 logger = logging.getLogger(__name__)
 
@@ -85,25 +86,26 @@ def build_app(settings: Settings, *, with_slack: bool = True) -> AppContext:
     )
 
 
-async def review_and_report(ctx: AppContext, cert: CertSummary) -> None:
-    """One ship: announce -> review -> report. Errors are reported, not raised."""
+async def review_and_report(ctx: AppContext, emission: PendingEmission) -> None:
+    """One ship: announce (unless pre-announced) -> review -> report."""
     assert ctx.announcer is not None
-    parent_ts = await ctx.announcer.announce_ship(cert)
+    parent_ts = emission.parent_ts or await ctx.announcer.announce_ship(emission.cert)
     try:
-        outcome = await ctx.runner.review_cert(cert.id)
+        outcome = await ctx.runner.review_cert(emission.cert.id)
     except Exception:
-        logger.exception("Review failed for cert %s", cert.id)
+        logger.exception("Review failed for cert %s", emission.cert.id)
         await ctx.announcer.post_failure(parent_ts)
         return
-    await ctx.announcer.post_outcome(cert, outcome, parent_ts)
+    await ctx.announcer.post_outcome(emission.cert, outcome, parent_ts)
 
 
 async def run_watcher_service(ctx: AppContext) -> None:
     """Poll for new ships; reviews run as bounded concurrent tasks."""
     assert ctx.announcer is not None
     settings = ctx.settings
+    source = make_pending_source(settings, ctx.client, announcer=ctx.announcer)
     watcher = Watcher(
-        ctx.client,
+        source,
         state_file=settings.watcher_state_file,
         poll_interval=settings.watcher_poll_interval,
         emit_backlog=settings.watcher_emit_backlog,
@@ -111,19 +113,24 @@ async def run_watcher_service(ctx: AppContext) -> None:
     semaphore = asyncio.Semaphore(settings.max_concurrent_reviews)
     running: set[asyncio.Task] = set()
 
-    async def handle(cert: CertSummary) -> None:
+    async def handle(emission: PendingEmission) -> None:
         async with semaphore:
-            await review_and_report(ctx, cert)
+            await review_and_report(ctx, emission)
 
-    async def spawn(cert: CertSummary) -> None:
+    async def spawn(emission: PendingEmission) -> None:
         # Don't block the poll loop on the review — one slow review must not
         # delay newer ships (v1 pain point #5).
-        task = asyncio.create_task(handle(cert), name=f"review-{cert.id}")
+        task = asyncio.create_task(handle(emission), name=f"review-{emission.cert.id}")
         running.add(task)
         task.add_done_callback(running.discard)
 
     await ctx.announcer.announce_online(settings.watcher_poll_interval)
-    await watcher.run(spawn)
+    try:
+        await watcher.run(spawn)
+    finally:
+        aclose = getattr(source, "aclose", None)
+        if aclose is not None:
+            await aclose()
 
 
 async def run_slack_service(ctx: AppContext) -> None:
@@ -179,10 +186,55 @@ async def run_slack_service(ctx: AppContext) -> None:
         """Delete one memory by its key when it is wrong or no longer matters."""
         return await memory.forget(key)
 
+    async def get_shipwrights_queue_stats() -> str:
+        """Get read-only Stardance queue totals and wait/type statistics.
+
+        Use for general conversation about queue health. This does not list,
+        claim, enqueue, or review ships and is unrelated to watcher behavior.
+        """
+        try:
+            page = await ctx.client.list_certifications(status=CertStatus.PENDING, page=1)
+            return json.dumps(
+                {
+                    "ok": True,
+                    "source": "shipwrights_dashboard",
+                    "retrieved_at": datetime.now(UTC).isoformat(),
+                    "pending": page.total,
+                    "status_counts": page.stats,
+                    "average_wait_seconds": page.avg_wait,
+                    "oldest": page.oldest.model_dump(mode="json") if page.oldest else None,
+                    "ai_enabled": page.ai_enabled,
+                    "project_type_counts": page.ai_type_counts,
+                }
+            )
+        except Exception as exc:
+            return json.dumps({"ok": False, "error": str(exc)})
+
+    async def get_shipwrights_feedback_templates() -> str:
+        """Get read-only shared and personal Dashboard feedback templates."""
+        try:
+            templates = await ctx.client.get_feedback_templates()
+            return json.dumps(
+                {
+                    "ok": True,
+                    "source": "shipwrights_dashboard",
+                    "retrieved_at": datetime.now(UTC).isoformat(),
+                    **templates.model_dump(mode="json"),
+                }
+            )
+        except Exception as exc:
+            return json.dumps({"ok": False, "error": str(exc)})
+
     chat_agent = create_chat_agent(
         ctx.settings,
         ctx.tools,
-        extra_tools=[run_review, remember, forget],
+        extra_tools=[
+            run_review,
+            remember,
+            forget,
+            get_shipwrights_queue_stats,
+            get_shipwrights_feedback_templates,
+        ],
         memory_provider=memory.render,
     )
     app = create_slack_app(settings, chat_agent)

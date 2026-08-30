@@ -45,18 +45,31 @@ async def cmd_show(settings: Settings, args: argparse.Namespace) -> None:
 
 
 async def cmd_watch(settings: Settings, args: argparse.Namespace) -> None:
+    from clanker.watcher import make_pending_source
+
+    if args.source:
+        settings = settings.model_copy(update={"watcher_source": args.source})
+
     async with ShipwrightsClient.from_settings(settings) as sw:
+        source = make_pending_source(settings, sw)
         watcher = Watcher(
-            sw,
+            source,
             state_file=settings.watcher_state_file,
             poll_interval=args.interval or settings.watcher_poll_interval,
-            emit_backlog=settings.watcher_emit_backlog,
+            emit_backlog=args.emit_backlog or settings.watcher_emit_backlog,
         )
 
-        async def announce(cert: CertSummary) -> None:
-            print("NEW:", _describe(cert))
+        async def announce(emission) -> None:
+            print("NEW:", _describe(emission.cert))
+            if emission.parent_ts:
+                print("     (pre-announced from Stardance at detection time)")
 
-        await watcher.run(announce)
+        try:
+            await watcher.run(announce)
+        finally:
+            aclose = getattr(source, "aclose", None)
+            if aclose is not None:
+                await aclose()
 
 
 async def cmd_review(settings: Settings, args: argparse.Namespace) -> None:
@@ -114,6 +127,17 @@ def main(argv: list[str] | None = None) -> None:
 
     p_watch = sub.add_parser("watch", help="watch for new pending certs")
     p_watch.add_argument("--interval", type=float, default=None, help="poll interval seconds")
+    p_watch.add_argument(
+        "--source",
+        default=None,
+        choices=["dashboard", "stardance"],
+        help="where to detect new ships (default: WATCHER_SOURCE env or 'dashboard')",
+    )
+    p_watch.add_argument(
+        "--emit-backlog",
+        action="store_true",
+        help="on the first run, treat existing pending ships as new",
+    )
     p_watch.set_defaults(func=cmd_watch)
 
     p_review = sub.add_parser("review", help="run one full review (no Slack)")

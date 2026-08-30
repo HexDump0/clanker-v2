@@ -29,7 +29,10 @@ class Settings(BaseSettings):
     shipwrights_base_url: str = "https://ds.shipwrights.dev"
     shipwrights_session: str = Field(
         default="",
-        description="Dashboard session JWT (the `session` cookie value).",
+        description=(
+            "Dashboard session JWT. A bare value, `session=...`, or pasted Cookie header "
+            "is accepted."
+        ),
     )
     shipwrights_workplace: str = "stardance"
     stardance_session: str = Field(
@@ -43,6 +46,15 @@ class Settings(BaseSettings):
     )
 
     # Watcher
+    watcher_source: Literal["dashboard", "stardance"] = Field(
+        default="dashboard",
+        description=(
+            "Where the watcher detects new pending ships: 'dashboard' polls the "
+            "Shipwrights certifications API; 'stardance' polls the Stardance "
+            "admin ship queue (source of truth, needs STARDANCE_SESSION) and "
+            "reconciles ships to Dashboard certs by external_id before emitting."
+        ),
+    )
     watcher_poll_interval: float = Field(default=30.0, ge=5.0)
     watcher_state_file: Path = Path("data/watcher_state.json")
     watcher_emit_backlog: bool = Field(

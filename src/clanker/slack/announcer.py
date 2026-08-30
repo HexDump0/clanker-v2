@@ -20,6 +20,7 @@ from slack_sdk.web.async_client import AsyncWebClient
 from clanker.review import ReviewOutcome
 from clanker.review.models import ReviewVerdict
 from clanker.shipwrights import CertSummary
+from clanker.stardance import AdminShip
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +31,7 @@ _STATUS_STYLE = {
     "APPROVE": ("#2EB67D", ":bread_nod:"),
     "REJECT": ("#E01E5A", ":no:"),
     "NEEDS HUMAN": ("#8B5CF6", ":aaa:"),
+    "DASH DOWN": ("#E01E5A", ":rotating_light:"),
 }
 _DEFAULT_STYLE = ("#8D8D8D", ":grey_question:")
 
@@ -167,7 +169,7 @@ class Announcer:
         try:
             await self._slack.chat_postMessage(
                 channel=self._channel,
-                text=f"I am alive..",
+                text="I am alive..",
             )
         except Exception:
             logger.exception("Failed to send online announcement")
@@ -208,6 +210,126 @@ class Announcer:
             text=":Running the automated review..",
         )
         return ts
+
+    def _stardance_attachment(
+        self,
+        ship: AdminShip,
+        *,
+        ship_url: str,
+        status_label: str,
+    ) -> dict:
+        """Embed for a ship announced straight from Stardance, pre-Dashboard.
+
+        The Stardance admin ship page stands in for the Dashboard link until
+        the ship is imported (the admin page itself redirects once it is).
+        """
+        color, _ = _STATUS_STYLE.get(status_label, _DEFAULT_STYLE)
+        ptype = ship.project_type or "?"
+
+        blocks: list[dict] = [
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": f"*{ship.title or ship.ship_id}*  ·  `{ptype}`  ·  `{status_label}`",
+                },
+            },
+            {"type": "divider"},
+            {
+                "type": "section",
+                "fields": [
+                    {"type": "mrkdwn", "text": f"*Author:*\n{ship.author or '—'}"},
+                    {"type": "mrkdwn", "text": f"*In queue:*\n{ship.wait or '—'}"},
+                ],
+            },
+        ]
+
+        link_parts = [f"<{ship_url}|#{ship.ship_id}>"]
+        if ship.demo_url:
+            link_parts.append(f"<{ship.demo_url}|Demo>")
+        if ship.repo_url:
+            link_parts.append(f"<{ship.repo_url}|Repo>")
+        blocks.append(
+            {"type": "context", "elements": [{"type": "mrkdwn", "text": "  ·  ".join(link_parts)}]}
+        )
+        return {
+            "color": color,
+            "blocks": blocks,
+            "fallback": f"New ship: {ship.title or ship.ship_id} ({ptype})",
+        }
+
+    async def announce_ship_from_stardance(
+        self, ship: AdminShip, *, ship_url: str
+    ) -> str:
+        """Announce a ship the instant Stardance shows it, pre-reconciliation.
+
+        Same two-message structure as ``announce_ship``; returns the embed ts
+        so the review result can later land in the same thread.
+        """
+        headline = f"New ship: {ship.title or ship.ship_id} ({ship.project_type or '?'})"
+        headline_blocks: list[dict] = [
+            {"type": "section", "text": {"type": "mrkdwn", "text": headline}}
+        ]
+        if ping := self._ping_mrkdwn():
+            headline_blocks.append(
+                {"type": "context", "elements": [{"type": "mrkdwn", "text": f"cc {ping}"}]}
+            )
+        await self._slack.chat_postMessage(
+            channel=self._channel, text=headline, blocks=headline_blocks
+        )
+        post = await self._slack.chat_postMessage(
+            channel=self._channel,
+            attachments=[
+                self._stardance_attachment(ship, ship_url=ship_url, status_label=_AUTOMATING)
+            ],
+        )
+        ts: str = post["ts"]
+        await self._slack.chat_postMessage(
+            channel=self._channel,
+            thread_ts=ts,
+            text=":Running the automated review..",
+        )
+        return ts
+
+    async def announce_dash_down(
+        self, ship: AdminShip, *, ship_url: str, parent_ts: str | None
+    ) -> None:
+        """Report that a detected ship will not be reviewed: Dashboard unreachable.
+
+        Flips the embed badge to ``DASH DOWN`` and posts the crash note in the
+        announcement thread so the thread no longer claims a review is running.
+        """
+        if parent_ts:
+            try:
+                await self._slack.chat_update(
+                    channel=self._channel,
+                    ts=parent_ts,
+                    attachments=[
+                        self._stardance_attachment(
+                            ship, ship_url=ship_url, status_label="DASH DOWN"
+                        )
+                    ],
+                )
+            except Exception:
+                logger.exception("Failed to flip ship embed to DASH DOWN")
+            try:
+                await self._slack.chat_postMessage(
+                    channel=self._channel,
+                    thread_ts=parent_ts,
+                    text=(
+                        ":rotating_light: dash crash — the Shipwrights Dashboard "
+                        "did not pick up this ship (retried once after 10s). "
+                        "Automated review skipped."
+                    ),
+                )
+            except Exception:
+                logger.exception("Failed to post dash-crash message")
+        else:
+            logger.error(
+                "dash crash: ship %s (%s) not imported by Dashboard — review skipped",
+                ship.ship_id,
+                ship_url,
+            )
 
     async def post_outcome(self, cert: CertSummary, outcome: ReviewOutcome, parent_ts: str) -> None:
         """Update the embed with the verdict, then upload every available artifact."""

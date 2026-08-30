@@ -38,6 +38,7 @@ Errors: `{"error": "..."}` with 401 (bad/missing auth), 403 (missing permission)
 | `status` | `PENDING`, `IN_REVIEW`, `APPROVED`, `REJECTED`, `RETURNED` (omit = all) |
 | `q` | free-text search |
 | `aiType` | AI-detected project type: `Web App`, `CLI`, `Hardware`, `Other`, `Extension`, `Chat Bot`, `Android App`, `iOS App`, `Desktop App (Linux)`, `Desktop App (Windows)`, `Desktop App (macOS)`, `Minecraft Mods`, `Cargo` |
+| `sort` | Comma-separated table sorts such as `date:asc`, `date:desc`, `dev:asc`, `dev:desc` |
 
 Response:
 ```json
@@ -64,8 +65,15 @@ yswsPickedUp, createdAt, updatedAt, _count.reviews`.
 ### Certification detail
 `GET /api/v1/workplaces/{slug}/certifications/{certId}`
 
-All summary fields plus: `submitterAvatar, reviews[], activeEvents[], feedbackRequired,
-proofVideoRequired, feedbackTemplatesEnabled, viewerIsClaimer, viewerIsGlobalAdmin`.
+All summary fields plus: `submitterAvatar, reviews[], attempts[], activeEvents[],
+feedbackRequired, proofVideoRequired, feedbackTemplatesEnabled, aiEnabled,
+viewerIsClaimer, viewerIsGlobalAdmin, canReport`.
+
+`reviews[]` contains reviews for the current attempt and may be empty on a pending
+resubmission. The complete history is in `attempts[]`, ordered oldest-first. Each attempt
+contains `id, externalId, projectName, status, createdAt, returnReason, returnedAt,
+reviews[]`. Historical attempt reviews currently omit their own `id` and `certId`, so
+clients must not require those two fields.
 
 `reviews[]` entry:
 ```json
@@ -75,6 +83,8 @@ proofVideoRequired, feedbackTemplatesEnabled, viewerIsClaimer, viewerIsGlobalAdm
   "reviewer": {"displayName": null, "slackUsername": "..."}
 }
 ```
+
+Reviewer objects may also include `slackId` and `slackAvatar`.
 
 ### GitHub data (cached server-side)
 `GET /api/v1/workplaces/{slug}/certifications/{certId}/github`
@@ -107,6 +117,16 @@ Stardance has `feedbackRequired: true`, so an empty comment is rejected client-s
 ### Internal notes [MUTATING]
 `PATCH /api/v1/workplaces/{slug}/certifications/{certId}`
 Body: `{"internalNotes": "..."}`
+
+`internalNotes` is returned by certification list/detail reads. It is private reviewer
+context and must not be copied into submitter-facing feedback or public artifacts.
+
+### Report certification to Fraud Squad [MUTATING]
+`POST /api/v1/workplaces/{slug}/certifications/{certId}/report`
+
+Observed in the current Dashboard frontend when detail response `canReport` is true.
+Request body/response semantics have not been safely exercised. Do not call without an
+explicit, human-confirmed reporting workflow.
 
 ### Proof video upload (3-step, Cloudflare R2)
 1. `GET .../certifications/{certId}/upload?filename=x.mp4&contentType=video/mp4`
@@ -263,3 +283,44 @@ RETURNED --------> IN_REVIEW (re-review; returnReason kept forever)
 - Verdicts are uppercase: `APPROVED` / `REJECTED`.
 - No rate-limit headers observed; still, be polite (serial requests, small delay).
 - Session JWT `exp` is ~30 days out; the bot will need a refreshed cookie periodically.
+- Do not send the former `clanker/0.1` user agent: live read-only tests on 2026-08-29 found
+  that Cloudflare specifically returned 403 for it while ordinary HTTPX, curl, and browser
+  request profiles succeeded with the same session. Detect Cloudflare HTML separately from
+  application 401/403 authentication errors.
+- Do not feed Dashboard `aiSummary` into Clanker's review agent; keep its judgment
+  independent. Human-authored `internalNotes`, attempt reviews, and return reasons are
+  useful reviewer context subject to the private-output boundary above.
+
+## Stardance admin ship-queue page (alternate watcher source)
+
+`GET https://stardance.hackclub.com/admin/certification/ship?status=pending&sort=newest&page=N`
+with the `_stardance_session_4` cookie. HTML only — `?format=json` and `.json` return
+HTTP 500 (verified 2026-08-30).
+
+- `In queue` metric (in the `ship-queue__metrics` block) is the pending total; other
+  metrics: Oldest waiting, Approval rate, Reviewed this week, Waiting too long.
+- Ships are `<tr class="ship-queue__row...">` rows, 25 per page (`limit=25`), newest
+  first: `ship-queue__project-title`, `ship-queue__project-id` (`#NNNN`),
+  `ship-queue__cell-author` (bare text), `ship-queue__wait-badge` (e.g. `0d`),
+  `ship-queue__hours`, and a `status-pill status-pill--<status>` cell. Some cells are
+  duplicated for responsive layouts — keep the first occurrence per field.
+- Status filter values: `pending | approved | returned | all`. The "Oldest waiting"
+  metric tile also links a ship id — it is not a queue row.
+- Stardance ship id == Dashboard cert `external_id`; the watcher source
+  (`WATCHER_SOURCE=stardance`) reconciles new ships against Dashboard PENDING pages by
+  that id before emitting, since the review packet builder needs the Dashboard record.
+- Implementation: `src/clanker/stardance.py`; ordinary HTTPX profile, per-request
+  `Cookie` header, redirects not followed (expired session = 302).
+- Verified 2026-08-30: Dashboard PENDING (42) is a perfect subset of Stardance pending
+  (108); the 66 newest Stardance pending ships are missing from the Dashboard (broken
+  import, one-directional). `status=approved`/`returned` walks behave oddly page-by-page
+  (more unique ids than the `In queue` metric); `status=pending` is consistent and is
+  all the watcher uses. `sort=date:desc` is supported on the Dashboard certifications
+  endpoint.
+- Ship-page redirect probe (2026-08-30): `GET /admin/certification/ship/<id>` 302s to
+  `https://ds.shipwrights.dev/stardance/certifications/<cert-uuid>` once the Dashboard
+  has imported the ship (cert id = last path segment); ships the Dashboard does not
+  know return HTTP 200 with the Stardance review page. The watcher uses this to
+  reconcile a new ship with a single Stardance request (one retry after 10s on a miss;
+  second miss = "dash down", ship dropped). A redirect to `/login` means the Stardance
+  session cookie expired.
