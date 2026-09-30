@@ -33,7 +33,28 @@ Given a submission packet, the review agent:
 It owns review judgment. It does not publish to Slack, generate artifacts, manage jobs,
 spawn other agents, or mutate Shipwrights.
 
-### Video director — one-shot vision model
+### Video director — code-only for first-layer rejections (2026-09-30)
+
+For first-layer rejections (the Jev path; see `AI/notes/jev-eval-results-2026-09-30.md`), the
+video is directed entirely by code with **no model calls**
+(`clanker.review.video.template_director`, entry point
+`clanker.review.video.pipeline.generate_reject_video`):
+
+- Each reject reason maps to at most one scene. There are at most 3 scenes, in the same priority order as
+  the reject message (`clanker.review.reject_message`).
+- Live public pages are captured: the GitHub file at the submission commit, the README, the demo, the
+  releases page, the repo, or the banner image. Reasons with no public page (raw README link, missing banner,
+  "untitled") become locally rendered text cards. A live capture that fails also falls back to a text
+  card showing the URL.
+- Captions and fixes use the same casual Shipwright voice as the reject message, so nothing reads as AI-written.
+  AI-code and AI-README scenes deliberately highlight nothing and ask for real rework
+  ("small edits won't be enough"). Pointing at a telltale line would suggest deleting it is the fix.
+- No voiceover. Music is optional (`VIDEO_MUSIC_ENABLED`). A typical video is 13–25 s and 1–2 MB, and takes about 17–36 s
+  to render after the reject message is posted.
+
+The vision-model director below remains for the older DeepSeek review path.
+
+### Video director — one-shot vision model (DeepSeek review path)
 
 The video director is a separate vision-capable model from the review agent. Application
 code first captures one clean screenshot for each material review evidence item. In one

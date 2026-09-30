@@ -134,11 +134,12 @@ def _phrases(reason: str, ctx: RejectContext) -> list[str]:
         part = "the CSS" if ctx.ai_style_file else "the code"
         return [
             f"it looks like a lot of your project is AI-generated, which is over our 30% limit. "
-            f"please rewrite {part} yourself and add some features you came up with",
+            f"please rework {part} yourself and add some features you came up with. Small edits "
+            f"won't be enough, it needs to actually be your work",
             f"your project seems to use an excessive amount of AI. please rewrite {part} by hand "
             f"and make it something that's really yours",
-            f"a lot of {part} looks and feels AI-generated (the limit is 30%). please rework it "
-            f"yourself and give it your own style",
+            f"a lot of {part} looks and feels AI-generated (the limit is 30%). please redo it "
+            f"yourself with your own design choices, not just small tweaks",
         ]
     if reason == "ai_readme_thin":
         return [
@@ -152,7 +153,8 @@ def _phrases(reason: str, ctx: RejectContext) -> list[str]:
         return [
             "your README seems to be written with AI. please rewrite it yourself, we'd like to "
             "see how you worked on the project",
-            "the README looks AI-written, please rewrite it in your own words",
+            "the README looks AI-written. Please write it yourself from scratch, not just edit "
+            "the AI version",
             "it looks like you used a lot of AI in your README. please rewrite it yourself and "
             "talk about how you made the project",
         ]
@@ -172,14 +174,16 @@ def _phrases(reason: str, ctx: RejectContext) -> list[str]:
                 f"the README link needs to be the raw file. please set it to {raw}",
             ]
         return [
-            "your README link isn't raw. open your README on GitHub, click \"Raw\" and use that "
+            'your README link isn\'t raw. open your README on GitHub, click "Raw" and use that '
             "raw.githubusercontent.com link",
             "the README link needs to be the raw file (raw.githubusercontent.com), not the GitHub "
             "page",
         ]
     if reason == "no_readme":
-        return ["your repo doesn't have a README yet, please add one",
-                "there's no README in the repo, please add one that explains the project"]
+        return [
+            "your repo doesn't have a README yet, please add one",
+            "there's no README in the repo, please add one that explains the project",
+        ]
     if reason == "ai_undeclared":
         return [
             "it seems AI was used in the project but it isn't declared. please declare it honestly "
@@ -196,29 +200,43 @@ def _phrases(reason: str, ctx: RejectContext) -> list[str]:
             f"or GitHub Pages",
         ]
     if reason == "demo_broken":
-        return ["your demo link doesn't seem to load right now",
-                "the demo page fails to load, so please check your deployment"]
+        return [
+            "your demo link doesn't seem to load right now",
+            "the demo page fails to load, so please check your deployment",
+        ]
     if reason == "demo_is_video":
-        return ["your demo link needs to let people actually try the project, not a video",
-                "the demo can't be a video, please link somewhere people can use the project"]
+        return [
+            "your demo link needs to let people actually try the project, not a video",
+            "the demo can't be a video, please link somewhere people can use the project",
+        ]
     if reason == "demo_is_repo":
         target = DEMO_BY_TYPE.get(kind, "somewhere people can try the project")
-        return [f"your demo link points to your repo, please change it to {target}",
-                f"the demo link should be {target} instead of the GitHub repo"]
+        return [
+            f"your demo link points to your repo, please change it to {target}",
+            f"the demo link should be {target} instead of the GitHub repo",
+        ]
     if reason == "missing_build":
         build = BUILD_BY_TYPE.get(kind, "a downloadable build")
-        return [f"your GitHub release needs to include {build}",
-                f"please upload {build} to a GitHub release and link that as the demo"]
+        return [
+            f"your GitHub release needs to include {build}",
+            f"please upload {build} to a GitHub release and link that as the demo",
+        ]
     if reason == "itch_no_build":
-        return ["your itch page should have a downloadable or playable build of the game",
-                "the itch.io page needs an actual build people can download or play"]
+        return [
+            "your itch page should have a downloadable or playable build of the game",
+            "the itch.io page needs an actual build people can download or play",
+        ]
     if reason == "bot_link_invalid":
-        return ["your bot's demo link should point to a public channel or server where people "
-                "can try the bot",
-                "the demo for a bot should be a channel or server invite so people can use it"]
+        return [
+            "your bot's demo link should point to a public channel or server where people "
+            "can try the bot",
+            "the demo for a bot should be a channel or server invite so people can use it",
+        ]
     if reason == "banner_default":
-        return ["please add a banner that shows your project in action, you can set it in "
-                "project settings"]
+        return [
+            "please add a banner that shows your project in action, you can set it in "
+            "project settings"
+        ]
     if reason == "banner_bad":
         what = BANNER_WHAT.get(ctx.banner_label or "", "that image")
         return [
@@ -227,15 +245,19 @@ def _phrases(reason: str, ctx: RejectContext) -> list[str]:
             f"the banner needs to show your project in action instead of {what}",
         ]
     if reason == "no_source":
-        return ["the repo seems to be missing the source code, please push it",
-                "your repo doesn't have the project's source code yet, please add it"]
+        return [
+            "the repo seems to be missing the source code, please push it",
+            "your repo doesn't have the project's source code yet, please add it",
+        ]
     if reason == "untitled":
         return ["your project seems to be named 'untitled', please give it a proper name"]
     if reason == "needs_api_key":
-        return ["please include a working API key in the demo so it can be tested. Hack Club "
-                "AI is a good free option",
-                "the demo needs to work without people bringing their own API key. Hack Club AI "
-                "is a free option you can use"]
+        return [
+            "please include a working API key in the demo so it can be tested. Hack Club "
+            "AI is a good free option",
+            "the demo needs to work without people bringing their own API key. Hack Club AI "
+            "is a free option you can use",
+        ]
     if reason == "feedback_ignored":
         return ["please make the changes requested in the previous review before reshipping"]
     if reason == "not_eligible":
@@ -245,10 +267,27 @@ def _phrases(reason: str, ctx: RejectContext) -> list[str]:
 
 # Order issues the way reviewers tend to: submission/format fixes, then AI, then README detail.
 ORDER = [
-    "no_source", "no_readme", "untitled", "readme_not_raw", "bad_hosting", "demo_is_repo",
-    "demo_is_video", "missing_build", "itch_no_build", "bot_link_invalid", "demo_broken",
-    "needs_api_key", "banner_default", "banner_bad", "ai_code", "ai_undeclared",
-    "ai_readme_thin", "ai_readme", "readme_thin", "feedback_ignored", "not_eligible",
+    "no_source",
+    "no_readme",
+    "untitled",
+    "readme_not_raw",
+    "bad_hosting",
+    "demo_is_repo",
+    "demo_is_video",
+    "missing_build",
+    "itch_no_build",
+    "bot_link_invalid",
+    "demo_broken",
+    "needs_api_key",
+    "banner_default",
+    "banner_bad",
+    "ai_code",
+    "ai_undeclared",
+    "ai_readme_thin",
+    "ai_readme",
+    "readme_thin",
+    "feedback_ignored",
+    "not_eligible",
 ]
 
 
@@ -268,14 +307,20 @@ def compose_reject_message(reasons: list[str], ctx: RejectContext, seed: str) ->
     if {"ai_readme", "readme_thin"} <= wanted:  # one README sentence, not two
         wanted -= {"ai_readme", "readme_thin"}
         wanted.add("ai_readme_thin")
-    issues = [_sentence_case(rng.choice(p)) for r in sorted(wanted & set(ORDER), key=ORDER.index)
-              if (p := _phrases(r, ctx))][:MAX_ISSUES]
+    issues = [
+        _sentence_case(rng.choice(p))
+        for r in sorted(wanted & set(ORDER), key=ORDER.index)
+        if (p := _phrases(r, ctx))
+    ][:MAX_ISSUES]
     if not issues:
         raise ValueError("no known reject reasons to describe")
 
     name = (ctx.submitter or "").strip()
-    greeting = (rng.choice(NAMED_GREETINGS).format(name=name)
-                if name and rng.random() < 0.35 else rng.choice(GREETINGS))
+    greeting = (
+        rng.choice(NAMED_GREETINGS).format(name=name)
+        if name and rng.random() < 0.35
+        else rng.choice(GREETINGS)
+    )
     pool = LIST_COMPLIMENTS if len(issues) > 2 else COMPLIMENTS
     if re.match(r"(your project|it looks like a lot of your project)", issues[0], re.I):
         pool = [c for c in pool if "project" not in c]  # avoid "Nice project, but your project"
@@ -298,6 +343,9 @@ def compose_reject_message(reasons: list[str], ctx: RejectContext, seed: str) ->
     closing = f"{rng.choice(closings)} {rng.choice(QUESTIONS)}"
     message = f"{greeting} {body}{'' if body.endswith(chr(10)) else ' '}{closing}"
     # Lowercase the first issue word after a comma-style compliment, capitalise after a period.
-    message = re.sub(r"(However,|but|though,|Unfortunately) (\w)",
-                     lambda m: f"{m.group(1)} {m.group(2).lower()}", message)
+    message = re.sub(
+        r"(However,|but|though,|Unfortunately) (\w)",
+        lambda m: f"{m.group(1)} {m.group(2).lower()}",
+        message,
+    )
     return message.replace("—", ",").strip()

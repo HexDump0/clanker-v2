@@ -67,16 +67,24 @@ def _scene_html(scene: ComposedScene, index: int, total: int) -> str:
         )
     fallback = " fallback" if scene.target_box is None else ""
     source = scene.capture.final_url
+    # "primary" is implied; only label the less obvious corroborating scenes.
+    role = (
+        f'<div class="role">{html.escape(scene.directed.role.value)}</div>'
+        if scene.directed.role.value != "primary"
+        else ""
+    )
+    # Text cards are rendered locally and have no URL to show.
+    source_html = f'<div class="source">{html.escape(source)}</div>' if source else ""
     return f"""
     <section class="scene evidence{fallback}" data-scene="{index}">
       <img class="capture" src="{_data_url(scene.capture.screenshot_path)}" alt="">
       <canvas width="1280" height="720" data-rect='{html.escape(rect)}'></canvas>
       <article class="callout" style="{_callout_position(scene)}">
-        <div class="role">{html.escape(scene.directed.role.value)}</div>
+        {role}
         <h2>{html.escape(scene.directed.title)}</h2>
         <p>{html.escape(scene.directed.explanation)}</p>
       </article>
-      <div class="source">{html.escape(source)}</div>
+      {source_html}
       <div class="index">{index:02d} / {total:02d}</div>
     </section>
     """

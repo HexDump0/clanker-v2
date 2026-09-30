@@ -11,16 +11,23 @@ from clanker.review.video.models import (
     VideoProject,
     VideoScript,
 )
-from clanker.review.video.pipeline import VideoGenerationResult, generate_review_video
+from clanker.review.video.pipeline import (
+    VideoGenerationResult,
+    generate_reject_video,
+    generate_review_video,
+)
 from clanker.review.video.recorder import RecordingResult, VideoError, record_video_script
+from clanker.review.video.template_director import RejectVideoInputs, TemplateDirector
 
 __all__ = [
     "CapturePolicy",
     "DirectedScene",
     "EvidenceCapture",
     "RecordingResult",
+    "RejectVideoInputs",
     "Scene",
     "SceneTarget",
+    "TemplateDirector",
     "VideoError",
     "VideoGenerationResult",
     "VideoPlan",
@@ -28,6 +35,7 @@ __all__ = [
     "VideoScript",
     "VisionDirector",
     "capture_evidence",
+    "generate_reject_video",
     "generate_review_video",
     "record_video_script",
 ]
