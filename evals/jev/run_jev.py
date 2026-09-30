@@ -48,9 +48,10 @@ async def main() -> None:
 
     bunny = {b["trace_id"]: b for b in read_jsonl(DATA / "bunny.jsonl") if "error" not in b}
     code = {c["trace_id"]: c for c in read_jsonl(CODE)}
+    ev2 = {e["trace_id"]: e for e in read_jsonl(DATA / "evidence2.jsonl")}
     jobs = []
     for t in traces:
-        states = build_states(t, bunny.get(t["trace_id"]), code.get(t["trace_id"]))
+        states = build_states(t, bunny.get(t["trace_id"]), code.get(t["trace_id"]), ev2.get(t["trace_id"]))
         for arm in arms:
             if arm in states and (t["trace_id"], arm) not in done:
                 jobs.append((t, arm, states))
@@ -83,7 +84,7 @@ async def main() -> None:
                 try:
                     questions = (
                         build_reject_questions()
-                        if arm == "reject"
+                        if arm in ("reject", "reject2")
                         else build_questions(with_investigation=arm != "packet")
                     )
                     resp = await client.system_one(states[arm], questions)
@@ -94,7 +95,7 @@ async def main() -> None:
                 data = resp.model_dump()
                 answers = data["answers"]
                 verdict, reasons = (
-                    ("n/a", []) if arm == "reject" else rule_verdict(answers, states["facts"])
+                    ("n/a", []) if arm.startswith("reject") else rule_verdict(answers, states["facts"])
                 )
                 usage = data.get("usage") or {}
                 async with lock:

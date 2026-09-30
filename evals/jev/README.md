@@ -30,3 +30,22 @@ uv run --with typesafe-sdk==0.7.2 python evals/jev/run_jev.py --budget 0.30
 # 4. report
 uv run python evals/jev/report.py --gate 0.6
 ```
+
+## First-layer (confident reject) flow
+
+Clanker is the automated first layer. It only REJECTs what it can confidently establish;
+everything else passes to a human. Splits are selected with `JEV_DATASET=dev|holdout`
+(export the holdout with `--random N` so it follows the production mix).
+
+```bash
+export JEV_DATASET=holdout
+uv run python evals/jev/evidence2.py        # pinned code excerpts, release assets, banner label (free vision)
+uv run --with typesafe-sdk==0.7.2 python evals/jev/run_jev.py --arms reject,reject2
+uv run --with typesafe-sdk==0.7.2 python evals/jev/report_v2.py   # v1 vs v2 + decisions_v2.csv
+```
+
+v2 adds code checks: default or bad banner (vision label), demo is a video, demo is the repo,
+missing release build (desktop/Android/CLI), itch.io page without a build, bot link that isn't
+an invite/channel, no source, "untitled". It adds Jev `project_type` and `needs_api_key`, turns
+on `demo_broken`, and picks code excerpts by real file size (largest style/UI/logic file, head
+plus a middle slice). Thresholds are in `thresholds_conservative2.json`.

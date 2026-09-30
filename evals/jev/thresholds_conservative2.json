@@ -1,0 +1,8 @@
+{
+  "ai_code": 0.7,
+  "ai_readme": 0.7,
+  "readme_thin": 0.9,
+  "ai_undeclared": 0.6,
+  "demo_broken": 0.7,
+  "needs_api_key": 0.8
+}

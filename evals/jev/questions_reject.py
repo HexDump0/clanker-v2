@@ -8,6 +8,7 @@ and each is phrased so that YES means "reject for this reason".
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from typesafe_sdk import Choice, Noul
@@ -31,6 +32,22 @@ REASONS = {
     "bad_hosting": "The demo is on a disallowed host (Render/Railway/Streamlit/tunnels/Drive/"
     "Colab/Hugging Face/localhost). Host it on permanent hosting.",
     "no_readme": "The repository has no README.",
+    # v2 code/vision-decided:
+    "banner_default": "Set a project banner: a screenshot of your project in action.",
+    "banner_bad": "Your banner must be a screenshot of your project in action (not code, a "
+    "logo, AI art, or an unrelated image). Change it in project settings.",
+    "demo_is_video": "The demo link must let reviewers try the project, not a video.",
+    "demo_is_repo": "The demo link points at the repository. Link the live site, a release "
+    "build, or the package/store page instead.",
+    "missing_build": "There's no downloadable build in your GitHub Releases. Upload the "
+    "executable/APK/binary to a release and link it as the demo.",
+    "itch_no_build": "Your itch.io page has no downloadable or browser-playable build.",
+    "bot_link_invalid": "A bot's demo link must be a server/channel invite where reviewers can "
+    "use the bot.",
+    "no_source": "The repository doesn't contain the project's source code.",
+    "untitled": "Your project is named 'untitled'. Give it a real name.",
+    "needs_api_key": "Reviewers can't test it without their own API key. Include a working "
+    "key/proxy (e.g. Hack Club AI) so the demo works out of the box.",
 }
 
 AI_LOOK = (
@@ -122,6 +139,38 @@ def build_reject_questions() -> dict[str, Any]:
                 "otherwise clearly ineligible for a Hack Club program?"
             )
         ),
+        "project_type": Choice(
+            instructions=(
+                "What kind of project is this, judged from `readme`, `repo_structure`, and the "
+                "demo (not from the claimed type)?"
+            ),
+            criteria={
+                "web_app": "A website or web app used in the browser.",
+                "desktop_app": "An application installed on Windows/macOS/Linux.",
+                "cli_tool": "A command-line program.",
+                "library": "A package/library other developers import.",
+                "api": "A backend HTTP API.",
+                "bot": "A Discord/Slack/Telegram chat bot.",
+                "android_app": "An Android app.",
+                "ios_app": "An iOS app.",
+                "game": "A playable video game.",
+                "game_mod": "A mod for an existing game.",
+                "browser_extension": "A browser extension or userscript.",
+                "hardware": "A physical electronics/hardware or 3D-printed project.",
+                "other": "None of the above.",
+            },
+        ),
+        "needs_api_key": Noul(
+            instructions=(
+                "Does the project require the reviewer to supply their own API key, token, or "
+                "paid account before the main feature works (no key or proxy is included)?"
+            ),
+            criteria={
+                "true": "README/code asks the user to paste their own OpenAI/Gemini/other key "
+                "or set env vars before it works, and the demo has no built-in key or proxy.",
+                "false": "Works out of the box, uses a bundled key/proxy, or needs no key.",
+            },
+        ),
         "main_reason": Choice(
             instructions="What is the single biggest problem with this submission?",
             criteria={
@@ -138,8 +187,58 @@ def build_reject_questions() -> dict[str, Any]:
 
 JEV_REASONS = (
     "ai_code", "ai_readme", "readme_thin", "demo_not_testable", "demo_broken",
-    "feedback_ignored", "ai_undeclared", "not_eligible",
+    "feedback_ignored", "ai_undeclared", "not_eligible", "needs_api_key",
 )
+
+VIDEO_HOSTS = re.compile(r"(^|\.)(youtube\.com|youtu\.be|vimeo\.com|loom\.com|streamable\.com)$")
+BOT_HOSTS = re.compile(r"(^|\.)(slack\.com|discord\.gg|discord\.com|discordapp\.com|t\.me|telegram\.me)$")
+BUILD_EXT = {
+    "desktop_app": (".exe", ".msi", ".dmg", ".zip", ".appimage", ".deb", ".rpm", ".tar.gz", ".pkg"),
+    "android_app": (".apk", ".aab"),
+    "cli_tool": (),
+}
+BAD_BANNERS = {"code_screenshot", "logo_or_text", "ai_generated_art", "unrelated"}
+ITCH_PLAYABLE = re.compile(r"download|run game|play in browser|launch|\.zip|\.exe|\.apk", re.I)
+
+
+def _host(url: str) -> str:
+    m = re.match(r"https?://([^/:?#]+)", url or "")
+    return m.group(1).lower() if m else ""
+
+
+def code_rules(answers: dict[str, Any], facts: dict[str, Any]) -> list[str]:
+    """v2 checks decided by code (plus the vision banner label); no thresholds."""
+    reasons: list[str] = []
+    ptype = answers.get("project_type", {})
+    kind = ptype.get("choice") if ptype.get("confidence", 0) >= 0.5 else None
+    demo = facts.get("demo_url") or ""
+    host = _host(demo)
+    if facts.get("banner_is_default"):
+        reasons.append("banner_default")
+    elif facts.get("banner_label") in BAD_BANNERS:
+        reasons.append("banner_bad")
+    if host and VIDEO_HOSTS.search(host) and kind != "hardware":
+        reasons.append("demo_is_video")
+    if facts["demo_url_is_repo_url"] and kind not in (None, "hardware"):
+        reasons.append("demo_is_repo")
+    assets = facts.get("release_assets")
+    if kind in BUILD_EXT and host == "github.com" and assets is not None:
+        # CLI: any release asset counts; desktop/Android need a matching installable format.
+        ok = bool(assets) if kind == "cli_tool" else any(
+            a.lower().endswith(BUILD_EXT[kind]) for a in assets
+        )
+        if not ok:
+            reasons.append("missing_build")
+    if host.endswith("itch.io") and facts.get("demo_http_status") == 200 and facts.get("demo_text") \
+            and not ITCH_PLAYABLE.search(facts["demo_text"]):
+        reasons.append("itch_no_build")
+    if kind == "bot" and host and not BOT_HOSTS.search(host):
+        reasons.append("bot_link_invalid")
+    if kind not in (None, "hardware") and facts.get("tree_code_files_v2") == 0:
+        reasons.append("no_source")
+    if re.match(r"\s*(untitled|new project|my project)\b", facts.get("project_name") or "", re.I):
+        reasons.append("untitled")
+    return reasons
 
 
 def reject_decision(
@@ -153,6 +252,8 @@ def reject_decision(
         reasons.append("readme_not_raw")
     if facts["demo_url_rejected_platforms"]:
         reasons.append("bad_hosting")
+    if facts.get("v2"):
+        reasons += code_rules(answers, facts)
     for key in JEV_REASONS:
         t = thresholds.get(key)
         if t is None:
@@ -161,6 +262,6 @@ def reject_decision(
             continue
         if key == "feedback_ignored" and not facts["previously_rejected"]:
             continue
-        if answers[key]["noul"] >= t:
+        if key in answers and answers[key]["noul"] >= t:
             reasons.append(key)
     return ("REJECT" if reasons else "PASS"), reasons

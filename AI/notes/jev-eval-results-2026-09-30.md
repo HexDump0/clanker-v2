@@ -80,3 +80,28 @@ random reviews from 2026-08-31 → 09-12 (production mix; humans rejected 78%). 
 - Label noise: GitHub READMEs can change between the bot review and the human review, and DeepSeek
   also rejected 5 of the 8 conservative bounces.
 - Per-review data: `data/eval/jev/{dev,holdout}/decisions.csv` (gitignored).
+
+## Update: v2 checks (banner, demo code checks, cheap checks, richer AI evidence)
+
+Holdout = 186 random reviews (Aug 31 – Sep 12; humans rejected 143 and approved 43). Thresholds are in
+`thresholds_conservative2.json`; nothing was tuned on the holdout.
+
+| holdout | rejects | precision | human rejects caught | good bounced (of 43) |
+|---|---|---|---|---|
+| DeepSeek | 68 | 87% | 59 (41%) | 9 |
+| v1 conservative | 78 | 87% | 68 (48%) | 10 |
+| **v2** | **102** | **87%** | **89 (62%)** | **13** |
+
+Per reason on the holdout (fires, precision): ai_code 36 (94%), ai_readme 31 (94%), readme_thin 27
+(85%), banner_bad 20 (95%, but 64% on dev), ai_undeclared 14 (100%), readme_not_raw 10 (90%),
+demo_broken 10 (90%), needs_api_key 6 (83%), no_source 4 (**50%**, weak on dev too; drop or fix),
+demo_is_video 3 (100%), bad_hosting 3 (100%). About 20% of historical banner URLs now return 404
+(banners replaced later), so the historical data under-exercises the banner check.
+
+## Reject messages
+`src/clanker/review/reject_message.py` builds rejection text that reads like a Shipwright wrote it,
+with no model involved. It uses per-reason phrasings modeled on 235 real reviewer comments (greeting,
+generic compliment, 1–2 issues inline or up to 3 bullets, "reship", #ask-the-shipwrights). Output is
+seeded by cert id so it is stable, and the wording varies between certs. It never signs as a person or
+claims anyone tested anything. Samples next to the human comments are in
+`data/eval/jev/{dev,holdout}/messages_v2.csv`.

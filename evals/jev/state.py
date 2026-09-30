@@ -115,7 +115,14 @@ def code_facts(sec: dict[str, str]) -> dict[str, Any]:
         for d in re.findall(r"^  - (\d{4}-\d{2}-\d{2}) REJECTED", history, re.M)
     )
     last_rejection = rejections[-1] if rejections else None
+    demo_text = render.split("Rendered visible text:", 1)[1] if "Rendered visible text:" in render else ""
     return {
+        "project_name": _field(sub, "Project name"),
+        "demo_url": demo_url if demo_url != "(none)" else "",
+        "demo_text": demo_text.strip()[:3000],
+        "banner_is_default": bool(
+            re.search(r"^- banner_is_default: True", sec.get("stardance_page", ""), re.M)
+        ),
         "previously_rejected": bool(rejections),
         "commits_after_last_rejection": (
             sum(d >= last_rejection for d in dates) if last_rejection else None
@@ -177,6 +184,7 @@ def build_states(
     trace: dict[str, Any],
     bunny: dict[str, Any] | None = None,
     code: dict[str, Any] | None = None,
+    ev2: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     prompt = trace["messages"][0]["parts"][0]["content"]
     sec = parse_packet(prompt)
@@ -204,4 +212,17 @@ def build_states(
         **packet_state,
         "code_excerpts": (code or {}).get("files") or [],
     }
+    if ev2 is not None:
+        # v2: richer code excerpts + code/vision facts (banner label, release assets, source).
+        facts.update(
+            v2=True,
+            banner_label=ev2.get("banner"),
+            release_assets=ev2.get("release_assets"),
+            tree_code_files_v2=ev2.get("tree_code_files"),
+        )
+        states["reject2"] = {
+            **packet_state,
+            "computed_facts": {k: v for k, v in facts.items() if k != "demo_text"},
+            "code_excerpts": ev2.get("files") or [],
+        }
     return states
