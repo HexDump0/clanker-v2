@@ -41,7 +41,10 @@ def main() -> None:
             if verdict != "REJECT":
                 continue
             prompt = t["messages"][0]["parts"][0]["content"]
-            field = lambda k: (m.group(1).strip() if (m := re.search(rf"^- {k}: (.*)$", prompt, re.M)) else None)  # noqa: E731
+            def field(k: str, prompt: str = prompt) -> str | None:
+                m = re.search(rf"^- {k}: (.*)$", prompt, re.M)
+                return m.group(1).strip() if m else None
+
             ctx = RejectContext(
                 submitter=(field("Submitter") or "").strip() or None,
                 repo_url=field("Repo URL"),

@@ -10,7 +10,6 @@ the frozen packet's file tree and reads them at the submission-time commit (pinn
 from __future__ import annotations
 
 import asyncio
-import json
 import re
 
 import httpx

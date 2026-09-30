@@ -147,6 +147,21 @@ def code_facts(sec: dict[str, str]) -> dict[str, Any]:
         "demo_http_status": int(status.group(1)) if status else None,
         "demo_viewport_mostly_empty": "Viewport was mostly empty" in render,
         "demo_rendered": bool(render),
+        # A bot wall (Cloudflare etc.) or a game engine still loading is not a broken demo.
+        "demo_challenge": bool(re.search(
+            r"cloudflare|verify (you are|you're) human|security verification|just a moment|"
+            r"captcha|\(HTTP (403|429)\)", render, re.I)),
+        "demo_engine_loading": bool(
+            "Viewport was mostly empty" in render
+            and re.search(r"unity|godot|webgl|loading|splash", render, re.I)
+        ),
+        "demo_render_all": render[:6000],
+        # GitHub language byte counts (from the packet): real source shows up here even when
+        # the files use extensions our list doesn't know (.pyw, .luau, ...).
+        "languages_present": "- Languages:" in tree,
+        "language_bytes": sum(
+            int(n) for n in re.findall(r"\((\d+) bytes\)", tree.split("- File tree", 1)[0])
+        ),
     }
 
 
@@ -190,7 +205,12 @@ def build_states(
     sec = parse_packet(prompt)
     facts = code_facts(sec)
     packet = {k: _cut(v, LIMITS.get(k, 6_000)) for k, v in sec.items() if k != "other"}
-    packet_state = {**packet, "computed_facts": facts}
+    packet_state = {
+        **packet,
+        "computed_facts": {
+            k: v for k, v in facts.items() if k not in ("demo_text", "demo_render_all")
+        },
+    }
 
     base = len(json.dumps(packet_state, ensure_ascii=False))
     steps = _investigation(trace["messages"])
@@ -222,7 +242,9 @@ def build_states(
         )
         states["reject2"] = {
             **packet_state,
-            "computed_facts": {k: v for k, v in facts.items() if k != "demo_text"},
+            "computed_facts": {
+                k: v for k, v in facts.items() if k not in ("demo_text", "demo_render_all")
+            },
             "code_excerpts": ev2.get("files") or [],
         }
     return states

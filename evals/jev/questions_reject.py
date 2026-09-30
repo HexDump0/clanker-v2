@@ -198,12 +198,24 @@ BUILD_EXT = {
     "cli_tool": (),
 }
 BAD_BANNERS = {"code_screenshot", "logo_or_text", "ai_generated_art", "unrelated"}
-ITCH_PLAYABLE = re.compile(r"download|run game|play in browser|launch|\.zip|\.exe|\.apk", re.I)
+# Anything suggesting a downloadable or browser-embedded build on the itch.io page.
+ITCH_PLAYABLE = re.compile(
+    r"download|run game|play in browser|launch|fullscreen|loading|embed|canvas|game window|"
+    r"\.zip|\.exe|\.apk",
+    re.I,
+)
 
 
 def _host(url: str) -> str:
     m = re.match(r"https?://([^/:?#]+)", url or "")
     return m.group(1).lower() if m else ""
+
+
+def _hosted_bot(answers: dict[str, Any], facts: dict[str, Any]) -> bool:
+    """A bot whose demo is a live channel/server is already running with its own keys."""
+    ptype = answers.get("project_type", {})
+    host = _host(facts.get("demo_url") or "")
+    return ptype.get("choice") == "bot" and bool(host) and bool(BOT_HOSTS.search(host))
 
 
 def code_rules(answers: dict[str, Any], facts: dict[str, Any]) -> list[str]:
@@ -230,11 +242,13 @@ def code_rules(answers: dict[str, Any], facts: dict[str, Any]) -> list[str]:
         if not ok:
             reasons.append("missing_build")
     if host.endswith("itch.io") and facts.get("demo_http_status") == 200 and facts.get("demo_text") \
-            and not ITCH_PLAYABLE.search(facts["demo_text"]):
+            and not ITCH_PLAYABLE.search(facts.get("demo_render_all") or facts["demo_text"]):
         reasons.append("itch_no_build")
     if kind == "bot" and host and not BOT_HOSTS.search(host):
         reasons.append("bot_link_invalid")
-    if kind not in (None, "hardware") and facts.get("tree_code_files_v2") == 0:
+    # No source only when GitHub reports no language bytes at all (not just unknown extensions).
+    if kind not in (None, "hardware") and facts.get("tree_code_files_v2") == 0 \
+            and facts.get("languages_present") and facts.get("language_bytes", 0) == 0:
         reasons.append("no_source")
     if re.match(r"\s*(untitled|new project|my project)\b", facts.get("project_name") or "", re.I):
         reasons.append("untitled")
@@ -258,7 +272,12 @@ def reject_decision(
         t = thresholds.get(key)
         if t is None:
             continue
-        if key == "demo_broken" and not facts["demo_rendered"]:
+        if key == "demo_broken" and (
+            not facts["demo_rendered"] or facts.get("demo_challenge")
+            or facts.get("demo_engine_loading")
+        ):
+            continue
+        if key == "needs_api_key" and _hosted_bot(answers, facts):
             continue
         if key == "feedback_ignored" and not facts["previously_rejected"]:
             continue
