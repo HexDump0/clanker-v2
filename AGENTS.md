@@ -30,6 +30,7 @@ clanker-v2/
 ├── sw-reviewer/        ← v1 source, REFERENCE ONLY (own git repo, gitignored here)
 ├── pyproject.toml      ← v2 Python package (uv-managed)
 ├── src/clanker/        ← v2 source: config, shipwrights API client, watcher, CLI
+├── evals/              ← offline experiments/evals (not app code), e.g. evals/jev/
 └── tests/              ← pytest suite (in-memory fake dashboard, no network)
 ```
 
