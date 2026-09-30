@@ -527,7 +527,7 @@ def make_settings(**overrides) -> Settings:
 def test_default_review_and_vision_models_are_current():
     settings = make_settings()
     assert settings.model_name == "deepseek/deepseek-v4-flash-0731"
-    assert settings.vision_model_name == "qwen/qwen3.8-flash"
+    assert settings.vision_model_name == "deepseek/deepseek-v4.1-flash"
 
 
 def test_vision_disables_reasoning_and_uses_dynamic_routing():

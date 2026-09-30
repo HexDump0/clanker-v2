@@ -5,7 +5,7 @@ Per trace:
   largest stylesheet, UI file, and logic file; head + middle slice of each (AI-look lives
   throughout a file, not just the top);
 - release assets that existed before the review (for demo format checks);
-- banner classification: the Stardance banner image goes to a free vision model with
+- banner classification: the Stardance banner image goes to a cheap vision model with
   a one-label question ("screenshot of the running project" vs code/logo/AI art/...).
 
     JEV_DATASET=dev uv run python evals/jev/evidence2.py
@@ -14,6 +14,7 @@ Per trace:
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 
 import httpx
@@ -25,7 +26,8 @@ from pydantic_ai.providers.openrouter import OpenRouterProvider
 from clanker.config import load_settings
 
 EVIDENCE = DATA / "evidence2.jsonl"
-VISION_MODEL = "stealth/space-bunny-alpha"  # free, image-capable
+# Cheap, image-capable, 30+ upstream providers (so no single provider can rate-limit us).
+VISION_MODEL = os.environ.get("JEV_BANNER_MODEL", "deepseek/deepseek-v4.1-flash")
 HEAD, MIDDLE = 2_500, 1_500
 
 SKIP = re.compile(
@@ -109,17 +111,29 @@ async def gather(t: dict, gh: httpx.AsyncClient, web: httpx.AsyncClient, vision:
     banner = re.search(r"^- banner_url: (\S+)", prompt, re.M)
     if banner:
         try:
-            img = await web.get(banner.group(1))
-            ctype = img.headers.get("content-type", "").split(";")[0]
-            if img.status_code == 200 and ctype.startswith("image/") and len(img.content) < 8_000_000:
-                res = await vision.run([BANNER_PROMPT, BinaryContent(data=img.content, media_type=ctype)])
-                text = res.output.strip().lower()
-                out["banner"] = next((k for k in BANNER_LABELS if k in text), "unclear")
-            else:
-                out["banner"] = f"unavailable:{img.status_code}:{ctype}"
+            out["banner"] = await classify_banner(banner.group(1), web, vision)
         except Exception as exc:
             out["banner"] = f"error:{type(exc).__name__}"
     return out
+
+
+def banner_agent(api_key: str) -> Agent:
+    return Agent(
+        OpenRouterModel(VISION_MODEL, provider=OpenRouterProvider(api_key=api_key)),
+        instructions="You classify project banner images. Answer with one label only.",
+        # One-word perception task: no reasoning tokens needed.
+        model_settings={"openrouter_reasoning": {"enabled": False}, "max_tokens": 20},
+    )
+
+
+async def classify_banner(url: str, web: httpx.AsyncClient, vision: Agent) -> str:
+    img = await web.get(url)
+    ctype = img.headers.get("content-type", "").split(";")[0]
+    if img.status_code != 200 or not ctype.startswith("image/") or len(img.content) >= 8_000_000:
+        return f"unavailable:{img.status_code}:{ctype}"
+    res = await vision.run([BANNER_PROMPT, BinaryContent(data=img.content, media_type=ctype)])
+    text = res.output.strip().lower()
+    return next((k for k in BANNER_LABELS if k in text), "unclear")
 
 
 async def main() -> None:
@@ -127,10 +141,7 @@ async def main() -> None:
     done = {r["trace_id"] for r in read_jsonl(EVIDENCE)}
     traces = [t for t in read_jsonl(TRACES) if t["trace_id"] not in done]
     print(f"{len(traces)} traces need evidence")
-    vision = Agent(
-        OpenRouterModel(VISION_MODEL, provider=OpenRouterProvider(api_key=settings.openrouter_api_key)),
-        instructions="You classify project banner images. Answer with one label only.",
-    )
+    vision = banner_agent(settings.openrouter_api_key)
     gh_headers = {"User-Agent": "clanker-eval", "Accept": "application/vnd.github+json"}
     if settings.github_token:
         gh_headers["Authorization"] = f"Bearer {settings.github_token}"

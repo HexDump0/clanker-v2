@@ -53,7 +53,7 @@ rather than falling back unless `OPENROUTER_ALLOW_FALLBACKS=true`).
 PDF reports need the `typst` binary (bundled in the Docker image).
 
 Demo pages are rendered in headless Chromium and their screenshot described by a
-vision model (`VISION_MODEL_NAME`, default `qwen/qwen3-vl-8b-thinking`) as extra
+vision model (`VISION_MODEL_NAME`, default `deepseek/deepseek-v4.1-flash`) as extra
 evidence for the review agent. Disable with `BROWSER_RENDER_ENABLED=false` if
 Chromium isn't available.
 

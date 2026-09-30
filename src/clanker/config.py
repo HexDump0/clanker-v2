@@ -116,7 +116,7 @@ class Settings(BaseSettings):
         ),
     )
     vision_model_name: str = Field(
-        default="qwen/qwen3.8-flash",
+        default="deepseek/deepseek-v4.1-flash",
         description="Vision model that describes rendered page screenshots.",
     )
     video_director_model_name: str = Field(
