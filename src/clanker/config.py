@@ -107,6 +107,28 @@ class Settings(BaseSettings):
     reasoning_effort: Literal["low", "medium", "high"] = "medium"
     agent_timeout: float = 120.0
 
+    # First-layer review (Jev decides; see AI/notes/jev-eval-results-2026-09-30.md)
+    review_mode: Literal["first_layer", "agent"] = Field(
+        default="first_layer",
+        description=(
+            "'first_layer': code checks + one Jev call REJECT only what can be confidently "
+            "established and PASS everything else to a human (no LLM writes anything). "
+            "'agent': the older DeepSeek review agent."
+        ),
+    )
+    jev_model: str = Field(
+        default="typesafe/jev-1.13",
+        description=(
+            "TypeSafe Jev model id on OpenRouter. Pinned to the evaluated version; the "
+            "'~typesafe/jev-latest' alias can change answers without notice."
+        ),
+    )
+    jev_timeout: float = Field(default=60.0, gt=0)
+    banner_model_name: str = Field(
+        default="deepseek/deepseek-v4.1-flash",
+        description="Cheap vision model that labels the project banner (one word).",
+    )
+
     # Browser render + vision describer (demo "does this look right?" evidence)
     browser_render_enabled: bool = Field(
         default=True,

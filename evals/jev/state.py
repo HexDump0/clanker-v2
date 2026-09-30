@@ -13,156 +13,20 @@ handed over as plain booleans/labels.
 from __future__ import annotations
 
 import json
-import re
-from datetime import date
 from typing import Any
 
-CUTOFF = date(2026, 6, 1)
 AGENT_STATE_CHARS = 70_000  # ~20-23k tokens; Jev allows 32k for state + longest question
 
-# Order matters: the first matching prefix wins, so "Submission attempts" precedes "Submission".
-SECTION_KEYS = {
-    "Submission attempts": "attempt_history",
-    "Submission": "submission",
-    "PRIVATE reviewer context": "private_reviewer_note",
-    "Prior reviews": "attempt_history",
-    "Active Dashboard events": "events",
-    "GitHub (cached": "github_commits",
-    "Repo structure": "repo_structure",
-    "Stardance ship page": "stardance_page",
-    "Demo page render": "demo_render",
-    "README": "readme",
-    "Reviewer feedback templates": None,  # wording reference only, never evidence
-}
-
-LIMITS = {
-    "readme": 15_000,
-    "repo_structure": 8_000,
-    "stardance_page": 8_000,
-    "demo_render": 7_000,
-    "github_commits": 4_000,
-    "attempt_history": 4_000,
-}
-
-BAD_DEMO_PATTERNS = {
-    "google_drive": r"drive\.google\.com|docs\.google\.com",
-    "colab": r"colab\.research\.google\.com",
-    "kaggle": r"kaggle\.com",
-    "huggingface": r"huggingface\.co|hf\.space",
-    "render_free": r"\.onrender\.com",
-    "railway": r"\.up\.railway\.app",
-    "streamlit": r"\.streamlit\.app|share\.streamlit\.io",
-    "tunnel": r"ngrok|trycloudflare|cloudflared|duckdns|loca\.lt|serveo",
-    "localhost": r"localhost|127\.0\.0\.1",
-    "source_zip": r"\.zip(\?|$)",
-    "raw_source_file": r"\.(py|js|ts|java|cpp|c|rs|go)(\?|$)",
-}
-
-
-def _cut(text: str, limit: int) -> str:
-    return text if len(text) <= limit else text[:limit] + f"\n...[truncated {len(text) - limit} chars]"
-
-
-def parse_packet(prompt: str) -> dict[str, str]:
-    # Split only on the packet's own section headers: README/devlog content has its own
-    # "## " headings, which must stay inside their section.
-    sections: dict[str, str] = {}
-    key: str | None = "other"
-    buf: list[str] = []
-
-    def flush() -> None:
-        if key is not None and buf:
-            body = "\n".join(buf).strip()
-            sections[key] = (sections[key] + "\n" + body) if key in sections else body
-
-    for line in prompt.split("\n"):
-        if line.startswith("## "):
-            title = line[3:]
-            match = next((v for k, v in SECTION_KEYS.items() if title.startswith(k)), "")
-            if match != "":
-                flush()
-                key, buf = match, []
-                continue
-        buf.append(line)
-    flush()
-    return sections
-
-
-def _field(submission: str, name: str) -> str:
-    m = re.search(rf"^- {re.escape(name)}: (.*)$", submission, re.MULTILINE)
-    return m.group(1).strip() if m else ""
-
-
-def code_facts(sec: dict[str, str]) -> dict[str, Any]:
-    sub = sec.get("submission", "")
-    repo_url = _field(sub, "Repo URL")
-    demo_url = _field(sub, "Demo URL")
-    readme_url = _field(sub, "Readme URL")
-    commits = re.findall(r"^- [0-9a-f]{6,12} (\d{4}-\d{2}-\d{2})", sec.get("github_commits", ""), re.M)
-    dates = sorted(date.fromisoformat(d) for d in commits)
-    created = re.search(r"created (\d{4}-\d{2}-\d{2})", sec.get("github_commits", ""))
-    history = sec.get("attempt_history", "")
-    render = sec.get("demo_render", "")
-    status = re.search(r"\(HTTP (\d{3})\)", render)
-    tree = sec.get("repo_structure", "")
-    tree_files = re.findall(r"^  - (.+)$", tree, re.M)
-    code_exts = (".py", ".js", ".ts", ".tsx", ".jsx", ".java", ".kt", ".swift", ".c", ".cpp",
-                 ".h", ".cs", ".rs", ".go", ".rb", ".php", ".html", ".css", ".vue", ".svelte",
-                 ".dart", ".lua", ".gd", ".ino", ".sh", ".scala", ".zig", ".m", ".sql")
-    bad = [name for name, pat in BAD_DEMO_PATTERNS.items() if demo_url and re.search(pat, demo_url, re.I)]
-    rejections = sorted(
-        date.fromisoformat(d)
-        for d in re.findall(r"^  - (\d{4}-\d{2}-\d{2}) REJECTED", history, re.M)
-    )
-    last_rejection = rejections[-1] if rejections else None
-    demo_text = render.split("Rendered visible text:", 1)[1] if "Rendered visible text:" in render else ""
-    return {
-        "project_name": _field(sub, "Project name"),
-        "demo_url": demo_url if demo_url != "(none)" else "",
-        "demo_text": demo_text.strip()[:3000],
-        "banner_is_default": bool(
-            re.search(r"^- banner_is_default: True", sec.get("stardance_page", ""), re.M)
-        ),
-        "previously_rejected": bool(rejections),
-        "commits_after_last_rejection": (
-            sum(d >= last_rejection for d in dates) if last_rejection else None
-        ),
-        "readme_url_is_raw_github": bool(re.match(r"https://raw\.githubusercontent\.com/", readme_url)),
-        "repo_url_is_repo_root": bool(
-            re.fullmatch(r"https://github\.com/[^/\s]+/[^/\s]+?(\.git)?/?", repo_url)
-        ),
-        "demo_url_present": bool(demo_url and demo_url != "(none)"),
-        "demo_url_is_repo_url": bool(demo_url and repo_url and demo_url.rstrip("/") == repo_url.rstrip("/")),
-        "demo_url_rejected_platforms": bad,
-        "readme_present": "```markdown" in sec.get("readme", ""),
-        "readme_chars": len(sec.get("readme", "")),
-        "commit_count_in_packet": len(dates),
-        "commits_before_cutoff": sum(d < CUTOFF for d in dates),
-        "repo_created_before_cutoff": bool(created and date.fromisoformat(created.group(1)) < CUTOFF),
-        "declared_as_updated_project": "(not declared as update)" not in _field(sub, "Updated project"),
-        "distinct_commit_days": len(set(dates)),
-        "prior_rejections": history.count("REJECTED by") + history.count(" REJECTED:"),
-        "tree_file_count": len(tree_files),
-        "tree_code_file_count": sum(f.lower().endswith(code_exts) for f in tree_files),
-        "demo_http_status": int(status.group(1)) if status else None,
-        "demo_viewport_mostly_empty": "Viewport was mostly empty" in render,
-        "demo_rendered": bool(render),
-        # A bot wall (Cloudflare etc.) or a game engine still loading is not a broken demo.
-        "demo_challenge": bool(re.search(
-            r"cloudflare|verify (you are|you're) human|security verification|just a moment|"
-            r"captcha|\(HTTP (403|429)\)", render, re.I)),
-        "demo_engine_loading": bool(
-            "Viewport was mostly empty" in render
-            and re.search(r"unity|godot|webgl|loading|splash", render, re.I)
-        ),
-        "demo_render_all": render[:6000],
-        # GitHub language byte counts (from the packet): real source shows up here even when
-        # the files use extensions our list doesn't know (.pyw, .luau, ...).
-        "languages_present": "- Languages:" in tree,
-        "language_bytes": sum(
-            int(n) for n in re.findall(r"\((\d+) bytes\)", tree.split("- File tree", 1)[0])
-        ),
-    }
+# The packet parser and code facts are the production ones (single source of truth).
+from clanker.review.first_layer.facts import (  # noqa: E402
+    BAD_DEMO_PATTERNS,  # noqa: F401  (re-exported for older eval scripts)
+    CUTOFF,  # noqa: F401
+    LIMITS,
+    SECTION_KEYS,  # noqa: F401
+    code_facts,
+    parse_packet,
+)
+from clanker.review.first_layer.facts import cut as _cut  # noqa: E402
 
 
 def _investigation(messages: list[dict]) -> list[dict[str, Any]]:
