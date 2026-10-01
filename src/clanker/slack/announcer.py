@@ -350,7 +350,7 @@ class Announcer:
         wrong_reasons: list[str],
         by: str | None = None,
     ) -> None:
-        """A human marked Clanker's review wrong: say so in the ship's thread (no ping)."""
+        """A human marked Clanker's review wrong: say so in the ship's thread."""
         lines = [
             ":rotating_light: *Clanker got this one wrong, please review manually.* "
             f"<{self._cert_link(cert_id)}|{project_name}>" + (f" (marked by {by})" if by else "")
