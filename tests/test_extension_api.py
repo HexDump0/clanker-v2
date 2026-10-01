@@ -159,3 +159,17 @@ async def test_failed_review_reports_error(store):
 
 async def test_request_review_unavailable_without_runner(api):
     assert (await api.post("/api/results/x1/review", headers=AUTH)).status == 503
+
+
+async def test_preflight_allows_private_network_access(api):
+    resp = await api.options(
+        "/api/results/x",
+        headers={
+            "Origin": "https://ds.shipwrights.dev",
+            "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Private-Network": "true",
+        },
+    )
+    assert resp.status == 200
+    assert resp.headers["Access-Control-Allow-Private-Network"] == "true"
+    assert "Authorization" in resp.headers["Access-Control-Allow-Headers"]

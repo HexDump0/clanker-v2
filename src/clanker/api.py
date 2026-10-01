@@ -122,6 +122,9 @@ async def _auth_and_cors(request: web.Request, handler: Any) -> web.StreamRespon
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Headers": "Authorization, Content-Type",
         "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        # Chrome blocks a public https page (the dashboard) from reaching 127.0.0.1 unless the
+        # preflight opts in (Private Network Access).
+        "Access-Control-Allow-Private-Network": "true",
     }
     if request.method == "OPTIONS":
         return web.Response(headers=cors)
