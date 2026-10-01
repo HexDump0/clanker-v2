@@ -1,5 +1,34 @@
 # Hosting Clanker for other reviewers
 
+## Coolify (clanker.hexdump0.pw)
+Coolify already terminates HTTPS with its own proxy, so deploy the repo's `Dockerfile` directly. You do **not** need `docker-compose.yml`
+or the Caddyfile in this folder (those are for hosting without Coolify).
+
+1. **DNS:** add an `A` record `clanker.hexdump0.pw` → your Coolify server's IP.
+2. **New resource** → your GitHub repo (`HexDump0/clanker-v2`, branch `main`; add a deploy key / GitHub App if it is private) →
+   **Build pack: Dockerfile**.
+3. **Domains:** `https://clanker.hexdump0.pw`. **Ports Exposes:** `8765`.
+4. **Environment variables:** copy everything from your local `.env` (Dashboard session, Slack, OpenRouter, ...), then add:
+   ```
+   EXTENSION_API_ENABLED=true
+   EXTENSION_API_HOST=0.0.0.0
+   EXTENSION_API_TRUST_PROXY=true
+   VIDEO_MUSIC_ENABLED=false
+   ```
+   Optional: `EXTENSION_REVIEWS_PER_USER_PER_DAY`, `EXTENSION_REVIEWS_PER_DAY`, `EXTENSION_ALLOWED_USERS` (see below).
+5. **Persistent storage:** add a volume mounted at `/app/data` (results, videos, PDFs, review budget, watcher state). Without it, every
+   redeploy wipes them.
+6. **Health check:** path `/healthz`, port `8765`.
+7. **Stop your local `uv run clanker run` before the first deploy.** Two running copies would both watch the queue and post to Slack twice.
+8. Deploy, then check `curl https://clanker.hexdump0.pw/healthz` → `{"ok": true}`.
+
+Things to know:
+- The server's own dashboard login (`SHIPWRIGHTS_SESSION`, and `STARDANCE_SESSION`) is a session that **expires** (yours expires
+  2026-10-27). When it does, the watcher and reviews stop with auth errors. Update the variable in Coolify and redeploy/restart.
+- The hosted server starts with an empty `data/`: reviews you ran locally won't appear in the extension unless you copy your local
+  `data/` into the volume. `WATCHER_EMIT_BACKLOG=false` means it will not flood Slack with the existing queue on first start.
+
+
 The extension talks to Clanker's API. Locally that is `http://127.0.0.1:8765`; hosted it is an HTTPS URL.
 
 ## 1. Run it (Docker + Caddy, automatic HTTPS)

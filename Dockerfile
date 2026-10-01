@@ -32,5 +32,8 @@ RUN uv run --no-sync playwright install --with-deps chromium && \
 RUN mkdir -p /app/data/pdfs
 VOLUME ["/app/data"]
 
+# The browser-extension API (EXTENSION_API_ENABLED=true) listens here; point your reverse proxy at it.
+EXPOSE 8765
+
 ENV PYTHONUNBUFFERED=1
 CMD ["uv", "run", "--no-sync", "clanker", "run"]
