@@ -45,6 +45,10 @@ class EvidenceCapture(BaseModel):
     viewport_width: int = Field(gt=0)
     viewport_height: int = Field(gt=0)
     elements: list[VisibleElement] = Field(default_factory=list)
+    # Taller screenshot from the top of the page (same coordinates as the viewport one)
+    # so a browser-style video can scroll; None when the page fits the viewport.
+    page_screenshot_path: Path | None = None
+    page_height: int | None = None
 
 
 class SceneRole(StrEnum):

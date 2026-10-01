@@ -70,8 +70,16 @@ video is directed entirely by code with **no model calls**
 - Captions and fixes use the same casual Shipwright voice as the reject message, so nothing reads as AI-written.
   AI-code and AI-README scenes deliberately highlight nothing and ask for real rework
   ("small edits won't be enough"). Pointing at a telltale line would suggest deleting it is the fix.
-- No voiceover. Music is optional (`VIDEO_MUSIC_ENABLED`). A typical video is 13–25 s and 1–2 MB, and takes about 17–36 s
-  to render after the reject message is posted.
+- It looks like a reviewer's screen recording, not an explainer (`browser_compositor.py`, 2026-10-01). The
+  captured screenshots are shown inside a plain browser window. Each scene opens with a click on the address
+  bar and the link typed (short links) or pasted (long ones), followed by a loading bar. The cursor moves on
+  curved, decelerating paths. Each page is read through: scroll a chunk, pause with the cursor following the text,
+  repeat, sometimes scroll back up (capture also saves a page screenshot up to 4000 px tall). The target
+  line is drag-selected, then reading continues below it. Captions are plain subtitles, and the
+  fix list sits over the last page. There are no title cards, counters or spotlight dimming. A seeded RNG
+  (the cert id) makes it deterministic.
+- No voiceover. Music is optional (`VIDEO_MUSIC_ENABLED`). A typical 3-scene video is about 49 s and 3–8 MB (scrolling code costs
+  bitrate), and takes about 65 s to render because the recording runs in real time.
 
 The vision-model director below remains for the older DeepSeek review path.
 

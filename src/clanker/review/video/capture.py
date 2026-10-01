@@ -20,6 +20,8 @@ from clanker.review.models import VideoEvidence
 from clanker.review.video.models import Box, EvidenceCapture, VisibleElement
 
 VIEWPORT = {"width": 1280, "height": 720}
+# How much of a long page the scrolling (browser-style) video can show.
+MAX_PAGE_HEIGHT = 4000
 
 FREEZE_CSS = """
 *, *::before, *::after {
@@ -50,7 +52,15 @@ DOM_SNAPSHOT_JS = r"""
     if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) {
       continue;
     }
-    const rect = element.getBoundingClientRect();
+    let rect = element.getBoundingClientRect();
+    // Block elements (headings, paragraphs) span the column; use the extent of the text
+    // itself so a highlight or drag-selection covers the words, not the empty space.
+    if (/^(H[1-6]|P|LI|A|SPAN|CODE|TD|TH|LABEL|BUTTON|STRONG|EM)$/.test(element.tagName)) {
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      const inner = range.getBoundingClientRect();
+      if (inner.width > 2 && inner.height > 2 && inner.width < rect.width) rect = inner;
+    }
     const left = Math.max(0, rect.left);
     const top = Math.max(0, rect.top);
     const right = Math.min(vw, rect.right);
@@ -220,6 +230,24 @@ async def capture_evidence(
                 caret="hide",
                 scale="css",
             )
+            page_height = await page.evaluate(
+                "max => Math.min(document.documentElement.scrollHeight, max)", MAX_PAGE_HEIGHT
+            )
+            page_path: Path | None = None
+            if page_height > VIEWPORT["height"]:
+                page_path = output_dir / f"{evidence.id}.page.png"
+                try:
+                    await page.screenshot(
+                        path=page_path,
+                        type="png",
+                        full_page=True,
+                        clip={"x": 0, "y": 0, "width": VIEWPORT["width"], "height": page_height},
+                        animations="disabled",
+                        caret="hide",
+                        scale="css",
+                    )
+                except Exception:  # the viewport screenshot alone is still usable
+                    page_path = None
             page_title = await page.title()
             logfire.info(
                 "Browser screenshot captured for {evidence_id}",
@@ -245,6 +273,8 @@ async def capture_evidence(
                     VisibleElement(text=item["text"], tag=item["tag"], box=Box(**item["box"]))
                     for item in raw_elements
                 ],
+                page_screenshot_path=page_path,
+                page_height=page_height if page_path else None,
             )
         except CaptureError:
             raise

@@ -214,6 +214,9 @@ async def render_composition(
                 page = await context.new_page()
                 await page.set_content(document, wait_until="load")
                 await page.screencast.start(path=webm, quality=95, size=VIEWPORT)
+                # Compositions that wait for the recording start their clock now, so the
+                # first frames aren't lost to the time between load and screencast start.
+                await page.evaluate("() => window.__clankerStart && window.__clankerStart()")
                 await page.wait_for_timeout(round(duration * 1000))
                 await page.screencast.stop()
                 await context.close()

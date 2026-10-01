@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from clanker.review.models import VideoEvidence
+from clanker.review.video.browser_compositor import build_browser_composition
 from clanker.review.video.capture import (
     DEFAULT_CAPTURE_POLICY,
     CaptureError,
@@ -124,8 +125,12 @@ async def _compose_and_render(
     music_path: Path | None,
     failures: dict[str, str],
     audit: list[dict[str, object]],
+    browser_seed: str | None = None,
 ) -> VideoGenerationResult:
-    """Resolve highlights, compose, encode, and write the run manifest."""
+    """Resolve highlights, compose, encode, and write the run manifest.
+
+    ``browser_seed`` switches to the screen-recording look (browser_compositor).
+    """
     capture_by_id = {capture.evidence_id: capture for capture in captures}
     scenes: list[ComposedScene] = []
     for directed in plan.scenes:
@@ -159,7 +164,10 @@ async def _compose_and_render(
             }
         )
 
-    document, duration = build_composition(project, plan, scenes)
+    if browser_seed is not None:
+        document, duration = build_browser_composition(project, plan, scenes, browser_seed)
+    else:
+        document, duration = build_composition(project, plan, scenes)
     started = time.perf_counter()
     video = await render_composition(document, duration, output_path, music_path=music_path)
     audit.append(
@@ -269,7 +277,8 @@ async def generate_reject_video(
         if spec.url:
             # The page couldn't be captured (bot wall, timeout, private host): show where the
             # problem is as a text card instead of dropping the scene.
-            spec.card_lines = [spec.url]
+            spec.card_lines = spec.card_lines or [spec.url]
+            spec.url = None  # a local card; don't pretend the page loaded
             stage = "text_card_fallback"
         else:
             stage = "text_card"
@@ -311,4 +320,5 @@ async def generate_reject_video(
         music_path=music_path,
         failures=failures,
         audit=audit,
+        browser_seed=seed,
     )

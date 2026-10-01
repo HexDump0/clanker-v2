@@ -32,7 +32,10 @@ def test_scene_order_merge_and_cap():
         "seed",
     )
     assert [s.reason for s in specs] == ["untitled", "readme_not_raw", "ai_code"]
-    assert all(s.url is None for s in specs[:2])  # text cards: no public page to capture
+    assert specs[0].url is None  # "untitled": a text card, no public page to capture
+    # The non-raw README link is a real page: open it; the caption gives the raw link.
+    assert specs[1].url == "https://github.com/a/b/blob/main/README.md"
+    assert "raw.githubusercontent.com/a/b/refs/heads/main/README.md" in specs[1].caption
     assert specs[2].url == "https://github.com/a/b/blob/abc1234/style.css"
 
 

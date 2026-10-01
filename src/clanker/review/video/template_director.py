@@ -170,18 +170,26 @@ def plan_scenes(reasons: Sequence[str], inputs: RejectVideoInputs, seed: str) ->
                 )
             )
         elif reason == "readme_not_raw":
-            raw = (
-                raw_readme_url(ctx.readme_url, ctx.repo_url) or "the raw file link"
-            )
+            raw = raw_readme_url(ctx.readme_url, ctx.repo_url)
+            # Open the link they actually set (the README page, not the raw file) when it's
+            # a real page; the caption says what to use instead.
+            current = ctx.readme_url if (ctx.readme_url or "").startswith("http") else None
             specs.append(
                 SceneSpec(
                     id="readme-link",
                     reason=reason,
+                    url=current,
                     title="The README link isn't raw",
-                    caption="Stardance needs the raw file so it can render it. "
-                    "Swap the link in your "
-                    "project settings.",
-                    card_lines=[f"now:  {ctx.readme_url or '(not set)'}", f"use:  {raw}"],
+                    caption=(
+                        f"Stardance needs the raw file. Set the README link to {raw}"
+                        if raw and len(raw) <= 170
+                        else "Stardance needs the raw file. Open your README, click Raw and "
+                        "use that link in your project settings."
+                    ),
+                    card_lines=[
+                        f"now:  {ctx.readme_url or '(not set)'}",
+                        f"use:  {raw or 'the raw file link'}",
+                    ],
                     fix="Set the README link to the raw file",
                 )
             )
@@ -469,18 +477,18 @@ def evidence_for(specs: Sequence[SceneSpec]) -> list[VideoEvidence]:
 
 
 async def render_text_card(spec: SceneSpec, output_dir: Path) -> EvidenceCapture:
-    """Render a text-card 'screenshot' locally (no network) in the video's visual style."""
+    """Render a text-card 'screenshot' locally (no network): a plain text page, so it looks
+    like any other tab in the browser-style video."""
     from playwright.async_api import async_playwright
 
     output_dir.mkdir(parents=True, exist_ok=True)
     path = output_dir / f"{spec.id}.png"
     lines = "".join(f"<div class='line'>{html.escape(line)}</div>" for line in spec.card_lines)
     document = f"""<!doctype html><html><head><meta charset="utf-8"><style>
-html,body{{margin:0;width:{VIEWPORT["width"]}px;height:{VIEWPORT["height"]}px;background:#161618;
-font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#e6e6e8}}
-.wrap{{position:absolute;left:90px;top:200px;right:90px}}
-.label{{color:#8b8b92;font-size:15px;margin-bottom:22px;font-family:Inter,system-ui,sans-serif}}
-.line{{font-size:21px;line-height:1.9;word-break:break-all}}
+html,body{{margin:0;width:{VIEWPORT["width"]}px;height:{VIEWPORT["height"]}px;background:#fff;
+font-family:"DejaVu Sans Mono","Liberation Mono",ui-monospace,monospace;color:#111}}
+.wrap{{position:absolute;left:8px;top:8px;right:8px}}
+.line{{font-size:15px;line-height:1.5;white-space:pre-wrap;word-break:break-all}}
 </style></head><body><div class="wrap">{lines}</div>
 </body></html>"""
     async with async_playwright() as p:

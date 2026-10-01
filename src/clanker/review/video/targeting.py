@@ -38,11 +38,22 @@ def _contains(outer: Box, inner: Box, *, tolerance: float = 1.0) -> bool:
     )
 
 
+def _mostly_inside(outer: Box, inner: Box, share: float = 0.9) -> bool:
+    """Inner overlaps outer by at least ``share`` of its area. Text-extent boxes (a heading's
+    glyphs) can poke a pixel or two outside their wrapper, so strict containment fails."""
+    w = min(outer.x + outer.width, inner.x + inner.width) - max(outer.x, inner.x)
+    h = min(outer.y + outer.height, inner.y + inner.height) - max(outer.y, inner.y)
+    return w > 0 and h > 0 and w * h >= share * inner.area
+
+
 def _leaf_matches(matches: list[VisibleElement]) -> list[VisibleElement]:
     """Drop ancestor elements while preserving repeated independent matches."""
     leaves: list[VisibleElement] = []
     for candidate in sorted(matches, key=lambda item: item.box.area):
-        if any(_contains(candidate.box, leaf.box) for leaf in leaves):
+        if any(
+            _contains(candidate.box, leaf.box) or _mostly_inside(candidate.box, leaf.box)
+            for leaf in leaves
+        ):
             continue
         if not any(
             abs(candidate.box.x - leaf.box.x) < 1
