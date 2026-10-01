@@ -131,7 +131,13 @@ async def _auth_and_cors(request: web.Request, handler: Any) -> web.StreamRespon
     supplied = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
     if not supplied or not await _is_valid(request.app, supplied):
         return web.json_response({"error": "unauthorized"}, status=401, headers=cors)
-    response = await handler(request)
+    try:
+        response = await handler(request)
+    except web.HTTPException as exc:
+        # Raised responses (404 etc.) skip the normal path; without CORS headers the browser
+        # reports a CORS failure instead of the real status.
+        exc.headers.update(cors)
+        raise
     response.headers.update(cors)
     return response
 

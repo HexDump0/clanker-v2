@@ -173,3 +173,11 @@ async def test_preflight_allows_private_network_access(api):
     assert resp.status == 200
     assert resp.headers["Access-Control-Allow-Private-Network"] == "true"
     assert "Authorization" in resp.headers["Access-Control-Allow-Headers"]
+
+
+async def test_error_responses_still_carry_cors_headers(api):
+    missing = await api.get(
+        "/api/results/nope", headers={**AUTH, "Origin": "https://ds.shipwrights.dev"}
+    )
+    assert missing.status == 404
+    assert missing.headers["Access-Control-Allow-Origin"] == "*"
