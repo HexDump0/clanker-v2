@@ -3,22 +3,51 @@
   "name": "Clanker for Shipwrights",
   "version": "0.1.0",
   "description": "See Clanker's judgement, reason and video on Shipwrights certifications, and fill them into your review.",
-  "permissions": ["cookies", "storage"],
-  "host_permissions": ["https://ds.shipwrights.dev/*", "http://127.0.0.1/*", "http://localhost/*"],
-  "optional_host_permissions": ["https://*/*"],
+  "permissions": [
+    "cookies",
+    "storage"
+  ],
+  "host_permissions": [
+    "https://ds.shipwrights.dev/*",
+    "http://127.0.0.1/*",
+    "http://localhost/*"
+  ],
+  "optional_host_permissions": [
+    "https://*/*"
+  ],
   "background": {
     "service_worker": "background.js",
-    "scripts": ["background.js"]
+    "scripts": [
+      "background.js"
+    ]
   },
-  "action": { "default_title": "Clanker judgements" },
+  "action": {
+    "default_title": "Clanker judgements"
+  },
   "content_scripts": [
     {
-      "matches": ["https://ds.shipwrights.dev/*/certifications/*"],
-      "js": ["api.js", "content.js"],
+      "matches": [
+        "https://ds.shipwrights.dev/*/certifications/*"
+      ],
+      "js": [
+        "api.js",
+        "content.js"
+      ],
       "run_at": "document_idle"
     }
   ],
   "browser_specific_settings": {
-    "gecko": { "id": "clanker@hackclub.local", "strict_min_version": "128.0" }
+    "gecko": {
+      "id": "clanker@hackclub.local",
+      "strict_min_version": "140.0",
+      "data_collection_permissions": {
+        "required": [
+          "authenticationInfo"
+        ]
+      }
+    },
+    "gecko_android": {
+      "strict_min_version": "142.0"
+    }
   }
 }

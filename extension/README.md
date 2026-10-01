@@ -19,3 +19,12 @@ Plain MV3 JavaScript, no build step. The same folder loads in both browsers.
 - **Request / Re-request Clanker review** runs a review on the server (ships Clanker hasn't seen, or a fresh look at one it has).
   One run per ship at a time, 60s cooldown, shares the review concurrency limit. A new result clears an old right/wrong label
   if the verdict or reasons changed.
+
+## Packaging / installing for real
+`extension/build.sh` writes `dist/clanker-chrome.zip` and `dist/clanker-firefox.xpi` (same contents).
+- **Chrome / Chromium:** Load unpacked works forever for your own use. A `.crx` outside the Web Store is blocked on
+  Windows/macOS; to share it, upload the zip to the Chrome Web Store (unlisted is fine, $5 one-time developer fee).
+- **Firefox:** release Firefox only installs *signed* add-ons. Options: (a) sign it as **unlisted** on addons.mozilla.org
+  (free; `npx web-ext sign --channel=unlisted --api-key=… --api-secret=…` with keys from the AMO developer hub), then open the
+  signed `.xpi`; (b) use Firefox Developer Edition/Nightly with `xpinstall.signatures.required=false`; (c) temporary
+  loading from `about:debugging` (cleared on restart).
