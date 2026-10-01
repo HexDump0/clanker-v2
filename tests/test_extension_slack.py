@@ -100,6 +100,7 @@ async def test_manual_review_flag_goes_in_the_ship_thread_with_the_note():
     assert kwargs["thread_ts"] == "5.5"
     assert "Clanker got this one wrong, please review manually" in kwargs["text"]
     assert "no README" in kwargs["text"] and "it has a README" in kwargs["text"]
+    assert "cc " not in kwargs["text"] and "@" not in kwargs["text"]  # never pings the ship group
 
 
 async def test_flag_manual_review_uses_the_stored_thread(tmp_path):

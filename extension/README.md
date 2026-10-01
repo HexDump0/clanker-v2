@@ -46,7 +46,7 @@ There is one queue: the **Clanker queue** (every review).
 - **Clanker was right** is just feedback. The ship stays in the queue; nothing else happens (it shows "✓ right").
 - **Clanker was wrong** takes the ship **off the Clanker queue** and marks it **"Clanker got it wrong"** (orange) for everyone who opens
   it: banner "Clanker got this one wrong, please review manually" plus your note, Clanker's reject message/video no longer offered
-  ("Use reason"/"Use video" disappear), and Slack gets the same message in the ship's thread (pinging the ship group), once, when a ship
+  ("Use reason"/"Use video" disappear), and Slack gets the same message in the ship's thread (no ping), once, when a ship
   changes into "wrong". The ones Clanker got wrong are behind the **Clanker got it wrong** filter. **Clear label** puts it back.
 - Nothing here submits a dashboard verdict.
 

@@ -350,7 +350,7 @@ class Announcer:
         wrong_reasons: list[str],
         by: str | None = None,
     ) -> None:
-        """A human marked Clanker's review wrong: ask the reviewers to do this one by hand."""
+        """A human marked Clanker's review wrong: say so in the ship's thread (no ping)."""
         lines = [
             ":rotating_light: *Clanker got this one wrong, please review manually.* "
             f"<{self._cert_link(cert_id)}|{project_name}>" + (f" (marked by {by})" if by else "")
@@ -359,8 +359,7 @@ class Announcer:
             lines.append("Marked wrong: " + ", ".join(wrong_reasons))
         if note:
             lines.append(f"> {note}")
-        if ping := self._ping_mrkdwn():
-            lines.append(f"cc {ping}")
+        # No group ping on purpose: the flag lands in the ship's thread for whoever is watching it.
         await self._slack.chat_postMessage(
             channel=self._channel, thread_ts=parent_ts, text="\n".join(lines)
         )
