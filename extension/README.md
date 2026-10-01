@@ -33,7 +33,10 @@ Plain MV3 JavaScript, no build step. The same folder loads in both browsers.
   sidebar link, a route change or Esc closes it.
 
 ## Design
-Styled from the dashboard's own "graphite" theme tokens (`ui.css`), with Geist / Geist Mono / Space Grotesk bundled in
-`fonts/` for the extension page. `ui.js` holds the shared result view used by both the judgements page and the cert panel.
-Judgements page: master/detail triage with filters, search, keyboard shortcuts (`j`/`k` move, `r` right, `w` wrong),
-"Review a ship" (paste a link or ID) and a settings dialog that tests the API connection.
+Modelled on the dashboard itself (not a generic dark UI): its "graphite" tokens (`ui.css`), Space Grotesk throughout (bundled in
+`fonts/`), tiny tracked uppercase labels, hairline-bordered flat surfaces, square status badges, outlined small buttons, a flat
+stats bar, filter buttons with a coloured dot + dim count, a dense table, and a breadcrumb detail view (banner, main column, info
+column). `ui.js` holds the shared result parts used by the Clanker page and the cert-page drawer.
+- Table: click a row (or `j`/`k` then Enter). Detail: `j`/`k` next/previous, `r` right, `w` wrong, `Esc` back. Labelling a ship in
+  "To review" jumps to the next one.
+- **Review PDF** opens Clanker's report (served by the API, `GET /api/results/{id}/pdf`).

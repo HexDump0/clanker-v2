@@ -17,6 +17,7 @@
     pen: '<path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/>',
     film: '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M7 3v18"/><path d="M17 3v18"/><path d="M3 12h18"/>',
     alert: '<circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><path d="M12 16h.01"/>',
+    file: '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/>',
     loader: '<path d="M21 12a9 9 0 1 1-6.219-8.56"/>',
   };
 
@@ -97,96 +98,120 @@
     };
   }
 
-  // ---- video blobs are cached per cert so reselecting a row does not refetch ----
+  // ---- blobs are cached per cert so reselecting a row does not refetch ----
   const videoCache = new Map();
-  function videoUrl(api, id) {
+  const videoBlob = (api, id) => {
     if (!videoCache.has(id)) {
       videoCache.set(id, api.videoBlob(id).then((b) => { if (!b) throw new Error("no video"); return b; }));
     }
     return videoCache.get(id);
+  };
+  const pdfUrls = new Map();
+  async function openPdf(api, id) {
+    if (!pdfUrls.has(id)) {
+      const blob = await api.pdfBlob(id);
+      if (!blob) throw new Error("no PDF for this review");
+      pdfUrls.set(id, URL.createObjectURL(blob));
+    }
+    h("a", { href: pdfUrls.get(id), target: "_blank", rel: "noopener" }).click();
   }
 
+  const badge = (verdict) => {
+    const m = verdictMeta(verdict);
+    return h("span", { class: `badge ${m.tone}` }, m.label);
+  };
+  const statusText = (verdict) => {
+    const m = verdictMeta(verdict);
+    return h("span", { class: `st ${m.tone}` }, m.label.toLowerCase());
+  };
+
   /**
-   * The result detail view. opts:
-   *   api, toast, onChanged(record), links (bool),
-   *   useReason(text) -> bool | undefined, useVideo(blob) -> Promise  (cert panel only)
-   * The returned element has .clankerRight() and .clankerWrong() for keyboard shortcuts.
+   * The pieces of a result, so each surface can arrange them. opts:
+   *   api, toast, onChanged(record, rerun), useReason(text) -> bool, useVideo(blob) -> Promise
+   * Returns { banner, message, video, reasons, info, feedback, pdfButton, rerunButton, right(), wrong() }.
    */
-  function detail(rec, opts) {
+  function parts(rec, opts) {
     const { api, toast } = opts;
     const meta = verdictMeta(rec.verdict);
     const pairs = reasonPairs(rec);
-    const root = h("div", { class: "detail-body" });
+    const out = {};
 
-    // --- summary + reasons
-    root.append(h("p", { class: "strong summary" }, rec.summary || "No summary."));
-    if (pairs.length) {
-      root.append(h("div", { class: "chips" }, pairs.map((p) => h("span", { class: "chip" }, p.label))));
-    }
+    out.banner = h("div", { class: `banner ${meta.tone}` },
+      h("div", { class: "top" }, h("span", { class: "lbl", style: "color:inherit;opacity:.75" }, "Clanker"), h("span", { title: new Date(rec.created_at).toLocaleString() }, `reviewed ${timeAgo(rec.created_at)}`)),
+      h("p", {}, rec.summary || "No summary."));
 
-    // --- shipper message
+    // message for the shipper (rejects)
     if (rec.message) {
-      const head = h("div", { class: "card-head" }, h("span", { class: "label" }, "Message for the shipper"),
-        h("div", { class: "row-actions" },
-          h("button", { class: "btn sm", onclick: async () =>
-            toast((await copyText(rec.message)) ? "Copied to clipboard" : "Could not copy", "ok") },
-            icon("copy"), "Copy"),
-          opts.useReason && h("button", { class: "btn sm tint accent", onclick: () => {
-            const ok = opts.useReason(rec.message);
-            if (ok) toast("Filled the review box. Read it, then submit.", "ok");
-            else { copyText(rec.message); toast("No review box here (claim the ship first). Copied instead."); }
-          } }, icon("pen"), "Use reason")));
-      root.append(h("div", { class: "card sunken" }, head, h("pre", { class: "msg" }, rec.message)));
+      const useReason = opts.useReason && h("button", { class: "btn t accent", onclick: () => {
+        const ok = opts.useReason(rec.message);
+        if (ok) toast("Filled the review box. Read it, then submit.", "ok");
+        else { copyText(rec.message); toast("No review box here (claim the ship first). Copied instead."); }
+      } }, "Use reason");
+      out.message = h("div", { class: "pc" },
+        h("div", { class: "pc-head" }, h("span", { class: "lbl" }, "Message for the shipper"),
+          h("div", { class: "row-actions" },
+            h("button", { class: "btn", onclick: async () => toast((await copyText(rec.message)) ? "Copied to clipboard" : "Could not copy", "ok") }, "Copy"),
+            useReason)),
+        h("pre", { class: "msg" }, rec.message));
     } else if (opts.useReason) {
-      // Not a reject: still allow filling the summary + reasons.
       const text = [rec.summary, ...pairs.map((p) => `- ${p.label}`)].filter(Boolean).join("\n");
-      root.append(h("div", { class: "row-actions" }, h("button", { class: "btn sm tint accent", onclick: () => {
+      out.message = h("div", { class: "row-actions" }, h("button", { class: "btn t accent", onclick: () => {
         const ok = opts.useReason(text);
         toast(ok ? "Filled the review box. Read it, then submit." : "No review box here (claim the ship first).", ok ? "ok" : "");
-      } }, icon("pen"), "Use summary as comment")));
+      } }, "Use summary as comment"));
     }
 
-    // --- video
+    // video
     if (rec.video_path) {
-      const wrap = h("div", { class: "video-wrap" }, h("div", { class: "skeleton" }, icon("loader", 20)));
-      wrap.firstChild.firstChild.classList.add("spin");
-      const useVideo = opts.useVideo && h("button", { class: "btn sm tint accent" }, icon("upload"), "Use video");
+      const wrap = h("div", { class: "video-wrap" }, h("div", { class: "skeleton" }, "Loading video…"));
+      const useVideo = opts.useVideo && h("button", { class: "btn t accent" }, "Use video");
       let blob = null;
-      videoUrl(api, rec.cert_id).then((b) => {
+      videoBlob(api, rec.cert_id).then((b) => {
         blob = b;
         wrap.replaceChildren(h("video", { controls: "", preload: "metadata", src: URL.createObjectURL(b) }));
-      }).catch(() => wrap.replaceChildren(h("div", { class: "skeleton hint" }, "Could not load the video")));
+      }).catch(() => wrap.replaceChildren(h("div", { class: "skeleton" }, "Could not load the video")));
       if (useVideo) {
         useVideo.addEventListener("click", async () => {
-          if (!blob) return toast("Video is still loading", "");
+          if (!blob) return toast("Video is still loading");
           useVideo.disabled = true;
           try { await opts.useVideo(blob); } catch (e) { toast(`Upload failed: ${e.message}`, "bad"); useVideo.disabled = false; }
         });
       }
-      root.append(h("div", { class: "card" },
-        h("div", { class: "card-head" }, h("span", { class: "label" }, "Video"), useVideo), wrap));
-    } else if (rec.verdict === "REJECT") {
-      root.append(h("div", { class: "card hint" }, icon("film"), " No video was generated for this one."));
+      out.video = h("div", { class: "pc" }, h("div", { class: "pc-head" }, h("span", { class: "lbl" }, "Video"), useVideo), wrap);
     }
 
-    // --- feedback
+    // reasons
+    if (pairs.length) {
+      out.reasons = h("div", { class: "pc" }, h("div", { class: "pc-head" }, h("span", { class: "lbl" }, rec.verdict === "REJECT" ? "Reasons" : "Why")),
+        h("ul", { class: "reasons" }, pairs.map((p) => h("li", {}, h("span", { class: `dot ${meta.tone}` }), p.label))));
+    }
+
+    // key/value info
+    const kv = (k, v) => h("div", { class: "kv" }, h("span", { class: "k" }, k), h("span", { class: "v" }, v));
+    out.info = h("div", { class: "pc" },
+      kv("Ship", h("span", { title: rec.cert_id }, rec.cert_id.slice(0, 8))),
+      kv("Verdict", statusText(rec.verdict)),
+      kv("Reviewed", new Date(rec.created_at).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })),
+      kv("Reasons", String(pairs.length)));
+
+    // feedback
     const status = h("div", { class: "hint" });
-    const rightBtn = h("button", { class: "btn tint ok" }, icon("check"), "Clanker was right");
-    const wrongBtn = h("button", { class: "btn tint bad" }, icon("x"), "Clanker was wrong");
+    const rightBtn = h("button", { class: "btn t ok block" }, "Clanker was right");
+    const wrongBtn = h("button", { class: "btn t bad block" }, "Clanker was wrong");
     const picked = new Set();
     const note = h("textarea", { rows: "3", placeholder: pairs.length ? "Anything else? (optional)" : "What did Clanker get wrong?" });
-    const wrongForm = h("div", { class: "wrong-form", hidden: "" },
-      pairs.length && h("div", { class: "label" }, "Which reasons were wrong?"),
-      pairs.length && h("div", { class: "chips" }, pairs.map((p) => {
-        const b = h("button", { class: "chip chip-btn", type: "button", onclick: () => {
+    const wrongForm = h("div", { class: "stack", hidden: "", style: "margin-top:10px" },
+      pairs.length ? h("div", { class: "lbl" }, "Which reasons were wrong?") : null,
+      pairs.map((p) => {
+        const b = h("button", { class: "pick", type: "button", onclick: () => {
           picked.has(p.code) ? picked.delete(p.code) : picked.add(p.code);
           b.classList.toggle("on", picked.has(p.code));
-        } }, p.label);
+        } }, h("span", { class: "box" }, icon("check")), p.label);
         return b;
-      })),
+      }),
       note,
       h("div", { class: "row-actions" },
-        h("button", { class: "btn tint accent", onclick: () => send("wrong", note.value, [...picked]) }, "Send feedback"),
+        h("button", { class: "btn t accent", style: "flex:1", onclick: () => send("wrong", note.value, [...picked]) }, "Send feedback"),
         h("button", { class: "btn ghost", onclick: () => { wrongForm.hidden = true; } }, "Cancel")));
 
     function showSaved(fb) {
@@ -195,7 +220,7 @@
       status.className = "hint " + (fb ? (fb.agreement === "right" ? "note-ok" : "note-bad") : "");
       status.textContent = fb
         ? `You marked this: Clanker was ${fb.agreement}.${fb.note ? ` “${fb.note}”` : ""}`
-        : "Your answer trains Clanker's rules. A human still decides the ship.";
+        : "Your answer improves Clanker. A human still decides the ship.";
     }
     async function send(agreement, text = "", wrong = []) {
       try {
@@ -206,21 +231,26 @@
       } catch (e) { toast(`Could not save: ${e.message}`, "bad"); }
     }
     rightBtn.addEventListener("click", () => send("right"));
-    wrongBtn.addEventListener("click", () => {
-      wrongForm.hidden = !wrongForm.hidden;
-      if (!wrongForm.hidden) note.focus();
-    });
+    wrongBtn.addEventListener("click", () => { wrongForm.hidden = !wrongForm.hidden; if (!wrongForm.hidden) note.focus(); });
     showSaved(rec.feedback);
-    root.append(h("div", { class: "card" },
-      h("div", { class: "card-head" }, h("span", { class: "label" }, "Was Clanker right?")),
-      h("div", { class: "row-actions" }, rightBtn, wrongBtn), status, wrongForm));
+    out.feedback = h("div", { class: "pc accent" },
+      h("div", { class: "pc-head" }, h("span", { class: "lbl" }, "Was Clanker right?")),
+      h("div", { class: "stack" }, rightBtn, wrongBtn), h("div", { style: "margin-top:8px" }, status), wrongForm);
 
-    // --- re-request
+    // PDF + re-request
+    out.pdfButton = h("button", { class: "btn", title: rec.pdf_path ? "Open Clanker's review report" : "No PDF was generated for this review" }, icon("file"), "Review PDF");
+    if (!rec.pdf_path) out.pdfButton.disabled = true;
+    out.pdfButton.addEventListener("click", async () => {
+      out.pdfButton.disabled = true;
+      try { await openPdf(api, rec.cert_id); } catch (e) { toast(`Could not open the PDF: ${e.message}`, "bad"); }
+      out.pdfButton.disabled = false;
+    });
     const rerunStatus = h("span", { class: "hint" });
-    const rerun = h("button", { class: "btn" }, icon("refresh"), "Re-request review");
-    rerun.addEventListener("click", async () => {
-      rerun.disabled = true;
-      rerun.querySelector("svg").classList.add("spin");
+    out.rerunStatus = rerunStatus;
+    out.rerunButton = h("button", { class: "btn" }, icon("refresh"), "Re-request review");
+    out.rerunButton.addEventListener("click", async () => {
+      const b = out.rerunButton;
+      b.disabled = true; b.querySelector("svg").classList.add("spin");
       try {
         const done = await api.runReview(rec.cert_id, (t) => (rerunStatus.textContent = t));
         if (done.state === "failed") throw new Error(done.error || "review failed");
@@ -229,22 +259,23 @@
       } catch (e) {
         rerunStatus.textContent = "";
         toast(`Review failed: ${e.message}`, "bad");
-        rerun.disabled = false;
-        rerun.querySelector("svg").classList.remove("spin");
+        b.disabled = false; b.querySelector("svg").classList.remove("spin");
       }
     });
-    root.append(h("div", { class: "row-actions" }, rerun, rerunStatus));
+    out.right = () => rightBtn.click();
+    out.wrong = () => wrongBtn.click();
+    return out;
+  }
 
-    root.clankerRight = () => rightBtn.click();
-    root.clankerWrong = () => wrongBtn.click();
+  // Everything stacked in one column: the cert-page drawer.
+  function detail(rec, opts) {
+    const p = parts(rec, opts);
+    const root = h("div", { class: "stack", style: "gap:12px" },
+      p.banner, p.message, p.video, p.reasons, p.feedback,
+      h("div", { class: "row-actions" }, p.pdfButton, p.rerunButton, p.rerunStatus));
+    root.clankerRight = p.right; root.clankerWrong = p.wrong;
     return root;
   }
 
-  // The first-layer verdict as a pill.
-  function verdictPill(verdict) {
-    const m = verdictMeta(verdict);
-    return h("span", { class: `pill ${m.tone}` }, icon(m.icon, 10), m.label);
-  }
-
-  globalThis.ClankerUI = { h, icon, svgFrom, verdictMeta, verdictPill, timeAgo, reasonPairs, copyText, toastFactory, detail };
+  globalThis.ClankerUI = { h, icon, svgFrom, verdictMeta, badge, statusText, timeAgo, reasonPairs, copyText, toastFactory, parts, detail };
 })();

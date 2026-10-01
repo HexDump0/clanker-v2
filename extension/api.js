@@ -77,6 +77,10 @@
     exportFeedback: () => request("/api/feedback.jsonl", { raw: true }),
     sendFeedback: (id, body) =>
       request(`/api/results/${encodeURIComponent(id)}/feedback`, { method: "POST", body }),
+    async pdfBlob(id) {
+      const res = await request(`/api/results/${encodeURIComponent(id)}/pdf`, { raw: true });
+      return res ? res.blob() : null;
+    },
     // The <video> tag cannot send an Authorization header, so fetch it as a blob.
     async videoBlob(id) {
       const res = await request(`/api/results/${encodeURIComponent(id)}/video`, { raw: true });

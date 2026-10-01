@@ -4,7 +4,7 @@
 // innerHTML) because the data comes from the Clanker API.
 (() => {
   const ext = globalThis.browser ?? globalThis.chrome;
-  const { h, icon, verdictMeta, verdictPill, timeAgo, toastFactory, detail } = ClankerUI;
+  const { h, icon, badge, timeAgo, toastFactory, detail } = ClankerUI;
   const COMMENT_BOX = 'textarea[placeholder^="Write feedback for the submitter"]';
 
   let host = null;
@@ -77,23 +77,22 @@
     if (currentId !== id) return; // navigated away while loading
 
     const rerender = () => render(slug, id);
-    const meta = record ? verdictMeta(record.verdict) : null;
 
     const close = () => { drawerOpen = false; draw(); };
     closeDrawer = close;
     const fab = h("button", { class: "fab", onclick: () => { drawerOpen = true; draw(); }, "aria-label": "Open Clanker" },
-      icon("bot"), "Clanker", record && verdictPill(record.verdict));
+      h("span", { class: "lbl" }, "Clanker"), record ? badge(record.verdict) : h("span", { class: "hint" }, "not reviewed"));
 
     function body() {
       if (error) {
-        return h("div", { class: "empty" }, h("div", { class: "big" }, icon("alert")),
+        return h("div", { class: "empty" },
           h("h3", {}, "Can't reach Clanker"), h("p", {}, error),
-          h("div", { class: "row-actions" }, h("button", { class: "btn tint accent", onclick: rerender }, icon("refresh"), "Retry")),
+          h("div", { class: "row-actions" }, h("button", { class: "btn t accent", onclick: rerender }, "Retry")),
           h("p", { class: "hint", style: "margin-top:12px" }, "Check the API URL under Settings on the Clanker page."));
       }
       if (!record) {
         const status = h("div", { class: "hint", style: "margin-top:10px" });
-        const ask = h("button", { class: "btn tint accent" }, icon("bot"), "Request Clanker review");
+        const ask = h("button", { class: "btn t accent" }, icon("refresh"), "Request Clanker review");
         ask.addEventListener("click", async () => {
           ask.disabled = true;
           ask.querySelector("svg").classList.add("spin");
@@ -108,7 +107,7 @@
             ask.querySelector("svg").classList.remove("spin");
           }
         });
-        return h("div", { class: "empty" }, h("div", { class: "big" }, icon("bot")),
+        return h("div", { class: "empty" },
           h("h3", {}, "Clanker hasn't looked at this ship"),
           h("p", {}, "Ask for a first-pass review. It takes about a minute and posts to Slack."),
           h("div", { class: "row-actions" }, ask), status);
@@ -133,9 +132,8 @@
       const title = record ? record.project_name : "Clanker";
       ui.append(h("div", { class: "drawer", role: "dialog", "aria-label": "Clanker" },
         h("div", { class: "drawer-head" },
-          h("div", { class: "logo" }, icon("bot")),
-          h("div", { class: "titles" }, h("h2", {}, title),
-            h("div", { class: "sub" }, record ? [verdictPill(record.verdict), timeAgo(record.created_at)] : "Not reviewed yet")),
+          h("div", { class: "titles" }, h("div", { class: "lbl" }, "Clanker"), h("h2", {}, title)),
+          record ? badge(record.verdict) : null,
           h("button", { class: "btn ghost icon", "aria-label": "Close", onclick: close }, icon("x"))),
         h("div", { class: "drawer-body" }, body())));
     }

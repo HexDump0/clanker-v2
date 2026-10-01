@@ -15,6 +15,7 @@ import hashlib
 import logging
 import time
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 from typing import Any
 
 from aiohttp import web
@@ -165,9 +166,16 @@ async def get_result(request: web.Request) -> web.Response:
 
 async def get_video(request: web.Request) -> web.StreamResponse:
     record = _record_or_404(request)
-    if not record.video_path:
+    if not record.video_path or not Path(record.video_path).is_file():
         raise web.HTTPNotFound(text="no video")
     return web.FileResponse(record.video_path)
+
+
+async def get_pdf(request: web.Request) -> web.StreamResponse:
+    record = _record_or_404(request)
+    if not record.pdf_path or not Path(record.pdf_path).is_file():
+        raise web.HTTPNotFound(text="no pdf")
+    return web.FileResponse(record.pdf_path, headers={"Content-Type": "application/pdf"})
 
 
 async def post_feedback(request: web.Request) -> web.Response:
@@ -231,6 +239,7 @@ def build_api(
     app.router.add_get("/api/feedback.jsonl", get_feedback_export)
     app.router.add_get("/api/results/{cert_id}", get_result)
     app.router.add_get("/api/results/{cert_id}/video", get_video)
+    app.router.add_get("/api/results/{cert_id}/pdf", get_pdf)
     app.router.add_post("/api/results/{cert_id}/feedback", post_feedback)
     app.router.add_post("/api/results/{cert_id}/review", post_review)
     app.router.add_get("/api/results/{cert_id}/review-status", get_review_status)

@@ -187,3 +187,16 @@ def test_reason_codes_get_human_labels(store):
     store.save_outcome(make_outcome())
     rec = store.get("c1")
     assert rec.reasons == ["no_readme"] and rec.reason_labels == ["no README"]
+
+
+async def test_pdf_is_served_only_when_the_result_has_one(api, store, tmp_path):
+    pdf = tmp_path / "c1.pdf"
+    pdf.write_bytes(b"%PDF-1.4 fake")
+    outcome = make_outcome("c1")
+    outcome.pdf_path = pdf
+    store.save_outcome(outcome)
+    store.save_outcome(make_outcome("c2"))  # no pdf
+    ok = await api.get("/api/results/c1/pdf", headers=AUTH)
+    assert ok.status == 200 and ok.headers["Content-Type"] == "application/pdf"
+    assert await ok.read() == b"%PDF-1.4 fake"
+    assert (await api.get("/api/results/c2/pdf", headers=AUTH)).status == 404
