@@ -40,3 +40,11 @@ column). `ui.js` holds the shared result parts used by the Clanker page and the 
 - Table: click a row (or `j`/`k` then Enter). Detail: `j`/`k` next/previous, `r` right, `w` wrong, `Esc` back. Labelling a ship in
   "To review" jumps to the next one.
 - **Review PDF** opens Clanker's report (served by the API, `GET /api/results/{id}/pdf`).
+
+## Right / wrong
+- **Clanker was right** is just info (counts toward Agreement %, exported as a label). Nothing else changes.
+- **Clanker was wrong** sends the ship to a human: it becomes **Manual review** (orange) for everyone who opens it, with the banner
+  "Clanker got this one wrong, please review manually" plus your note; Clanker's reject message/video are no longer offered
+  ("Use reason"/"Use video" disappear); and Slack gets the same message in the ship's thread (pinging the ship group).
+  Slack is told once, when a ship changes into "wrong", not on edits. **Clear label** undoes it.
+- The Clanker page has a **Manual review** queue (stat + filter). Nothing here submits a dashboard verdict.

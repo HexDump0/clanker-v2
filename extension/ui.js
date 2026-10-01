@@ -116,12 +116,17 @@
     h("a", { href: pdfUrls.get(id), target: "_blank", rel: "noopener" }).click();
   }
 
-  const badge = (verdict) => {
-    const m = verdictMeta(verdict);
+  // A ship a human marked "Clanker was wrong" shows as "manual review" everywhere, not as Clanker's verdict.
+  const shown = (x) => {
+    const rec = typeof x === "string" ? { verdict: x } : x;
+    return rec.manual_review ? { tone: "flag", label: "Manual review" } : verdictMeta(rec.verdict);
+  };
+  const badge = (x) => {
+    const m = shown(x);
     return h("span", { class: `badge ${m.tone}` }, m.label);
   };
-  const statusText = (verdict) => {
-    const m = verdictMeta(verdict);
+  const statusText = (x) => {
+    const m = shown(x);
     return h("span", { class: `st ${m.tone}` }, m.label.toLowerCase());
   };
 
@@ -132,11 +137,21 @@
    */
   function parts(rec, opts) {
     const { api, toast } = opts;
-    const meta = verdictMeta(rec.verdict);
+    const meta = shown(rec);
     const pairs = reasonPairs(rec);
+    const fb = rec.feedback;
+    const manual = !!rec.manual_review;
+    const wrongCodes = new Set(fb?.wrong_checks || []);
+    if (manual) { opts = { ...opts, useReason: undefined, useVideo: undefined }; } // never push a wrong message
     const out = {};
 
-    out.banner = h("div", { class: `banner ${meta.tone}` },
+    if (manual) {
+      out.banner = h("div", { class: "banner flag" },
+        h("div", { class: "top" }, h("span", { class: "lbl", style: "color:inherit;opacity:.75" }, "Clanker · marked wrong"),
+          h("span", {}, `reviewed ${timeAgo(rec.created_at)}`)),
+        h("p", {}, "Clanker got this one wrong, please review manually."),
+        fb?.note ? h("p", { style: "font-size:13px;opacity:.85" }, `“${fb.note}”`) : null);
+    } else out.banner = h("div", { class: `banner ${meta.tone}` },
       h("div", { class: "top" }, h("span", { class: "lbl", style: "color:inherit;opacity:.75" }, "Clanker"), h("span", { title: new Date(rec.created_at).toLocaleString() }, `reviewed ${timeAgo(rec.created_at)}`)),
       h("p", {}, rec.summary || "No summary."));
 
@@ -148,7 +163,7 @@
         else { copyText(rec.message); toast("No review box here (claim the ship first). Copied instead."); }
       } }, "Use reason");
       out.message = h("div", { class: "pc" },
-        h("div", { class: "pc-head" }, h("span", { class: "lbl" }, "Message for the shipper"),
+        h("div", { class: "pc-head" }, h("span", { class: "lbl" }, manual ? "Clanker's message (marked wrong, don't send)" : "Message for the shipper"),
           h("div", { class: "row-actions" },
             h("button", { class: "btn", onclick: async () => toast((await copyText(rec.message)) ? "Copied to clipboard" : "Could not copy", "ok") }, "Copy"),
             useReason)),
@@ -183,14 +198,15 @@
     // reasons
     if (pairs.length) {
       out.reasons = h("div", { class: "pc" }, h("div", { class: "pc-head" }, h("span", { class: "lbl" }, rec.verdict === "REJECT" ? "Reasons" : "Why")),
-        h("ul", { class: "reasons" }, pairs.map((p) => h("li", {}, h("span", { class: `dot ${meta.tone}` }), p.label))));
+        h("ul", { class: "reasons" }, pairs.map((p) => h("li", { class: wrongCodes.has(p.code) ? "struck" : "" }, h("span", { class: `dot ${meta.tone}` }), p.label))));
     }
 
     // key/value info
     const kv = (k, v) => h("div", { class: "kv" }, h("span", { class: "k" }, k), h("span", { class: "v" }, v));
     out.info = h("div", { class: "pc" },
       kv("Ship", h("span", { title: rec.cert_id }, rec.cert_id.slice(0, 8))),
-      kv("Verdict", statusText(rec.verdict)),
+      kv("Verdict", statusText(rec)),
+      kv("Your label", fb ? (manual ? "wrong · manual review" : "right") : "—"),
       kv("Reviewed", new Date(rec.created_at).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })),
       kv("Reasons", String(pairs.length)));
 
@@ -201,6 +217,7 @@
     const picked = new Set();
     const note = h("textarea", { rows: "3", placeholder: pairs.length ? "Anything else? (optional)" : "What did Clanker get wrong?" });
     const wrongForm = h("div", { class: "stack", hidden: "", style: "margin-top:10px" },
+      h("div", { class: "hint" }, "This flags the ship for a human to review manually and posts to Slack."),
       pairs.length ? h("div", { class: "lbl" }, "Which reasons were wrong?") : null,
       pairs.map((p) => {
         const b = h("button", { class: "pick", type: "button", onclick: () => {
@@ -211,22 +228,25 @@
       }),
       note,
       h("div", { class: "row-actions" },
-        h("button", { class: "btn t accent", style: "flex:1", onclick: () => send("wrong", note.value, [...picked]) }, "Send feedback"),
+        h("button", { class: "btn t accent", style: "flex:1", onclick: () => send("wrong", note.value, [...picked]) }, "Flag for manual review"),
         h("button", { class: "btn ghost", onclick: () => { wrongForm.hidden = true; } }, "Cancel")));
 
+    const clearBtn = h("button", { class: "btn ghost", hidden: "", onclick: () => send("clear") }, "Clear label");
     function showSaved(fb) {
       rightBtn.classList.toggle("on", fb?.agreement === "right");
       wrongBtn.classList.toggle("on", fb?.agreement === "wrong");
-      status.className = "hint " + (fb ? (fb.agreement === "right" ? "note-ok" : "note-bad") : "");
-      status.textContent = fb
-        ? `You marked this: Clanker was ${fb.agreement}.${fb.note ? ` “${fb.note}”` : ""}`
-        : "Saved as a label for Clanker's evals. A human still decides the ship.";
+      status.className = "hint " + (fb ? (fb.agreement === "right" ? "note-ok" : "") : "");
+      if (fb?.agreement === "wrong") status.style.color = "#fb923c"; else status.style.color = "";
+      status.textContent = !fb ? "Right is just info for us. Wrong flags the ship for a manual review."
+        : fb.agreement === "right" ? "Marked right. Just info, nothing else changes."
+        : "Flagged for manual review. Slack was told; other reviewers see it here.";
+      clearBtn.hidden = !fb;
     }
     async function send(agreement, text = "", wrong = []) {
       try {
         const saved = await api.sendFeedback(rec.cert_id, { agreement, note: text, wrong_checks: wrong });
-        rec.feedback = saved.feedback; showSaved(rec.feedback); wrongForm.hidden = true;
-        toast(`Saved: Clanker was ${agreement}`, "ok");
+        rec.feedback = saved.feedback; rec.manual_review = saved.manual_review; showSaved(rec.feedback); wrongForm.hidden = true;
+        toast(agreement === "wrong" ? "Flagged for manual review" : agreement === "clear" ? "Label cleared" : "Saved: Clanker was right", "ok");
         opts.onChanged?.(saved);
       } catch (e) { toast(`Could not save: ${e.message}`, "bad"); }
     }
@@ -235,7 +255,7 @@
     showSaved(rec.feedback);
     out.feedback = h("div", { class: "pc accent" },
       h("div", { class: "pc-head" }, h("span", { class: "lbl" }, "Was Clanker right?")),
-      h("div", { class: "stack" }, rightBtn, wrongBtn), h("div", { style: "margin-top:8px" }, status), wrongForm);
+      h("div", { class: "stack" }, rightBtn, wrongBtn), h("div", { style: "margin-top:8px" }, status, clearBtn), wrongForm);
 
     // PDF + re-request
     out.pdfButton = h("button", { class: "btn", title: rec.pdf_path ? "Open Clanker's review report" : "No PDF was generated for this review" }, icon("file"), "Review PDF");
@@ -277,5 +297,5 @@
     return root;
   }
 
-  globalThis.ClankerUI = { h, icon, svgFrom, verdictMeta, badge, statusText, timeAgo, reasonPairs, copyText, toastFactory, parts, detail };
+  globalThis.ClankerUI = { h, icon, svgFrom, verdictMeta, shown, badge, statusText, timeAgo, reasonPairs, copyText, toastFactory, parts, detail };
 })();

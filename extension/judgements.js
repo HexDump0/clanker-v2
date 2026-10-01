@@ -1,7 +1,7 @@
 // Clanker judgements. A dashboard-style table of everything Clanker judged, and a detail view where a
 // human confirms or overrules Clanker's call. The real verdict is still submitted by a human on the dashboard.
 (() => {
-  const { h, icon, verdictMeta, badge, statusText, timeAgo, reasonPairs, toastFactory, parts } = ClankerUI;
+  const { h, icon, badge, statusText, timeAgo, reasonPairs, toastFactory, parts } = ClankerUI;
   const DASH = "https://ds.shipwrights.dev/stardance/certifications/";
   const ID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
   const KEY = "clanker.page";
@@ -52,6 +52,7 @@
       cell("Rejects", rejects, "bad", pct(rejects)),
       cell("Approves", approves, "ok", pct(approves)),
       cell("Needs human", count((r) => norm(r.verdict) === "NEEDS_HUMAN"), "warn"),
+      cell("Manual review", count((r) => r.manual_review), "flag"),
       cell("Agreement", labelled.length ? `${Math.round((right / labelled.length) * 100)}%` : "–", null, labelled.length ? `${labelled.length} labelled` : ""));
   }
 
@@ -78,7 +79,7 @@
     return h("div", { class: "filters" },
       h("div", { class: "frow" }, v("", "All"), v("REJECT", "Reject", "bad"), v("APPROVE", "Approve", "ok"), v("NEEDS_HUMAN", "Needs human", "warn")),
       h("div", { class: "frow" },
-        l("todo", "To review", count((r) => !r.feedback), "accent"), l("wrong", "Marked wrong", count((r) => r.feedback?.agreement === "wrong"), "bad"),
+        l("todo", "To review", count((r) => !r.feedback), "accent"), l("wrong", "Manual review", count((r) => r.manual_review), "flag"),
         l("right", "Marked right", count((r) => r.feedback?.agreement === "right"), "ok"), l("all", "Everything", state.results.length),
         h("div", { class: "search" }, search)));
   }
@@ -93,10 +94,11 @@
     const pairs = reasonPairs(r);
     const why = pairs.length ? pairs[0].label + (pairs.length > 1 ? `, +${pairs.length - 1} more` : "") : (r.summary || "").split(". ")[0];
     const lab = r.feedback
-      ? h("span", { class: r.feedback.agreement === "right" ? "note-ok" : "note-bad" }, r.feedback.agreement === "right" ? "✓ right" : "✗ wrong")
+      ? h("span", { class: r.feedback.agreement === "right" ? "note-ok" : "flag", style: r.feedback.agreement === "right" ? "" : "color:var(--c)" },
+          r.feedback.agreement === "right" ? "✓ right" : "⚑ manual")
       : "—";
     return h("button", { class: "tr" + (r.cert_id === state.cursor ? " cur" : ""), "data-id": r.cert_id, onclick: () => open(r.cert_id) },
-      h("span", { class: "td-name" }, r.project_name), statusText(r.verdict),
+      h("span", { class: "td-name" }, r.project_name), statusText(r),
       h("span", { class: "td-why", title: why }, why), h("span", { class: "td-lab" }, lab),
       h("span", { class: "td-when", title: new Date(r.created_at).toLocaleString() }, timeAgo(r.created_at)));
   }
@@ -107,7 +109,7 @@
 
   function tableBox() {
     const box = h("div", { class: "table", id: "tablebox" });
-    box.append(h("div", { class: "tr head" }, th("Project", "project"), th("Verdict", "verdict"), h("span", { class: "lbl" }, "Reason"), h("span", { class: "lbl" }, "Your label"), th("Reviewed", "created")));
+    box.append(h("div", { class: "tr head" }, th("Project", "project"), th("Verdict", "verdict"), h("span", { class: "lbl" }, "Reason"), h("span", { class: "lbl" }, "Label"), th("Reviewed", "created")));
     if (!state.loaded) { box.append(...Array.from({ length: 7 }, () => h("div", { class: "skel" }))); return box; }
     if (state.error) {
       box.append(emptyBox("Can't reach the Clanker API", state.error,
@@ -153,7 +155,7 @@
       h("button", { class: "btn ghost icon", title: "Next (j)", disabled: idx < 0 || idx >= items.length - 1 ? "" : null, onclick: () => step(1) }, "›"));
     const head = h("div", { class: "crumb" },
       h("button", { class: "btn ghost", onclick: back }, icon("back"), "Back"), h("span", { class: "sep" }, "/"),
-      h("h2", {}, r.project_name), badge(r.verdict),
+      h("h2", {}, r.project_name), badge(r),
       h("div", { class: "right" }, nav, link(r.demo_url, "Demo"), link(r.repo_url, "Repo"), link(r.stardance_url, "Project", "info"), link(DASH + r.cert_id, "Open ship", "accent")));
 
     p.pdfButton.classList.add("block"); p.rerunButton.classList.add("block");

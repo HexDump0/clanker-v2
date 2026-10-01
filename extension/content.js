@@ -81,7 +81,8 @@
     const close = () => { drawerOpen = false; draw(); };
     closeDrawer = close;
     const fab = h("button", { class: "fab", onclick: () => { drawerOpen = true; draw(); }, "aria-label": "Open Clanker" },
-      h("span", { class: "lbl" }, "Clanker"), record ? badge(record.verdict) : h("span", { class: "hint" }, "not reviewed"));
+      h("span", { class: "lbl" }, "Clanker"), record ? badge(record) : h("span", { class: "hint" }, "not reviewed"));
+    if (record?.manual_review) fab.classList.add("flag");
 
     function body() {
       if (error) {
@@ -133,7 +134,7 @@
       ui.append(h("div", { class: "drawer", role: "dialog", "aria-label": "Clanker" },
         h("div", { class: "drawer-head" },
           h("div", { class: "titles" }, h("div", { class: "lbl" }, "Clanker"), h("h2", {}, title)),
-          record ? badge(record.verdict) : null,
+          record ? badge(record) : null,
           h("button", { class: "btn ghost icon", "aria-label": "Close", onclick: close }, icon("x"))),
         h("div", { class: "drawer-body" }, body())));
     }

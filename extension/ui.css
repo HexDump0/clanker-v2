@@ -25,7 +25,7 @@
   stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .muted { color: var(--ink-muted); } .dim { color: var(--ink-dim); } .strong { color: var(--ink-strong); }
 .ok { --c: var(--ok); } .bad { --c: var(--bad); } .warn { --c: var(--warn); }
-.info { --c: var(--info); } .accent { --c: var(--accent); } .neutral { --c: var(--ink-muted); }
+.info { --c: var(--info); } .flag { --c: #fb923c; } .accent { --c: var(--accent); } .neutral { --c: var(--ink-muted); }
 
 /* tiny tracked uppercase label, the dashboard's section/column heading */
 .lbl { font-size: 10px; font-weight: 500; letter-spacing: .14em; text-transform: uppercase; color: var(--ink-dim); }
@@ -76,6 +76,7 @@
 .kv .k { color: var(--ink-muted); } .kv .v { color: var(--ink-strong); text-align: right; min-width: 0; overflow-wrap: anywhere; }
 .reasons { list-style: none; margin: 0; padding: 0; }
 .reasons li { display: flex; align-items: center; gap: 9px; padding: 7px 0; border-top: 1px solid var(--edge-subtle); font-size: 13px; color: var(--ink); }
+.reasons li.struck { color: var(--ink-dim); text-decoration: line-through; }
 .reasons li:first-child { border-top: 0; padding-top: 0; }
 .msg { margin: 0; font-family: inherit; white-space: pre-wrap; word-break: break-word; font-size: 13px; line-height: 1.6; color: var(--ink); max-height: 240px; overflow: auto; }
 .pick { display: flex; align-items: center; gap: 9px; width: 100%; text-align: left; cursor: pointer; padding: 6px 8px; border-radius: 6px;

@@ -17,3 +17,4 @@
 .empty { text-align: center; padding: 44px 8px; color: var(--ink-muted); }
 .empty h3 { color: var(--ink-strong); font-size: 14px; margin-bottom: 4px; }
 .empty .row-actions { justify-content: center; margin-top: 14px; }
+.fab.flag { border-color: color-mix(in srgb, #fb923c 55%, transparent); }
