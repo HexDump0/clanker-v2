@@ -193,7 +193,7 @@ def _code_checks(result: FirstLayerResult, packet: ReviewPacket) -> list[dict[st
 def build_report_data(result: FirstLayerResult, packet: ReviewPacket) -> dict[str, Any]:
     """Everything the first-layer template shows, as plain JSON-able data."""
     return {
-        "verdict": "REJECT" if result.verdict == "REJECT" else "NEEDS HUMAN",
+        "verdict": {"REJECT": "REJECT", "APPROVE": "APPROVE"}.get(result.verdict, "NEEDS HUMAN"),
         "project_type": result.project_type,
         "reasons": [
             {
@@ -205,6 +205,7 @@ def build_report_data(result: FirstLayerResult, packet: ReviewPacket) -> dict[st
         ],
         "message": result.message or "",
         "near_misses": result.near_misses,
+        "unsure": result.unsure,
         "jev": _jev_rows(result),
         "code_checks": _code_checks(result, packet),
     }

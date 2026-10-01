@@ -129,7 +129,7 @@ async def test_gitlab_readme_is_not_flagged_missing_or_not_raw(client, dashboard
         client, dashboard, monkeypatch, ("# Fleeting\nan app", f"{GITLAB}/-/raw/HEAD/README.md")
     )
     result = await make_reviewer(jev_answers()).review(packet)
-    assert result.verdict == "PASS"
+    assert result.verdict != "REJECT"
     assert result.facts["readme_url_is_raw"] and result.facts["repo_host"] == "gitlab"
 
 
@@ -138,7 +138,8 @@ async def test_unreachable_forge_never_rejects_for_readme(client, dashboard, mon
     assert packet.readme_unverified
     assert "not verified" in packet.to_prompt()
     result = await make_reviewer(jev_answers(readme_thin=0.99, ai_readme=0.99)).review(packet)
-    assert result.verdict == "PASS"
+    assert result.verdict == "NEEDS_HUMAN"
+    assert "couldn't reach the repo host to read the README" in result.unsure
 
 
 async def test_missing_readme_rejects_once_not_also_thin(client, dashboard, monkeypatch):

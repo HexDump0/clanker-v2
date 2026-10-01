@@ -25,8 +25,12 @@ results, and adapts what it does next.
 `REVIEW_MODE` picks the reviewer the runner uses (`clanker.review.runner.ReviewRunner`):
 
 - `first_layer` (default): `clanker.review.first_layer.FirstLayerReviewer`. Code facts plus one
-  Jev call, then REJECT only what is confidently established, or PASS to a human
-  (`FLAG_FOR_HUMAN` / "NEEDS HUMAN" in Slack). Nothing is LLM-written: the reject message
+  Jev call, then REJECT only what is confidently established. Everything else is **APPROVE** when every
+  check clearly passed, or **NEEDS HUMAN** (`FLAG_FOR_HUMAN`) when Clanker is unsure: a score within 0.2 of
+  its limit, 4–5 modern-AI-CSS signals, a context flag (demo not testable, earlier feedback ignored,
+  possibly ineligible), or missing evidence (README/demo/banner/code/commit history/project type).
+  `FirstLayerResult.unsure` lists why. Neither is a dashboard action: a human reviews every ship. On the eval
+  holdout, 62% of APPROVEs were human-approved, against 28% of NEEDS HUMAN and a 23% base rate. Nothing is LLM-written: the reject message
   comes from `clanker.review.reject_message` and is posted in the Slack thread for a human to
   send from the dashboard; on REJECT the code-directed reject video is rendered when
   `VIDEO_ENABLED`. `ReviewOutcome.reject_message` / `.first_layer` carry the result.

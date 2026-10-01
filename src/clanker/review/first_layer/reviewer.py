@@ -1,8 +1,10 @@
-"""First-layer review: code facts + one Jev call -> REJECT (with a human-style message) or PASS.
+"""First-layer review: code facts + one Jev call -> REJECT, APPROVE or NEEDS_HUMAN.
 
 No LLM writes anything here. Jev (a typed-decision model) answers fixed yes/no questions,
 code applies the thresholds and hard rules, and the rejection message comes from templates
-(``clanker.review.reject_message``). PASS means "a human tests the demo next", not approval.
+(``clanker.review.reject_message``). APPROVE means every automated check clearly passed;
+NEEDS_HUMAN means Clanker isn't sure (a score near its limit, or evidence it couldn't get).
+Neither is a dashboard action: a human still reviews and tests every ship.
 """
 
 from __future__ import annotations
@@ -117,7 +119,7 @@ JevAsk = Callable[[Mapping[str, Any], Mapping[str, Any]], Awaitable[tuple[dict[s
 
 @dataclass(slots=True)
 class FirstLayerResult:
-    verdict: Literal["REJECT", "PASS"]
+    verdict: Literal["REJECT", "APPROVE", "NEEDS_HUMAN"]
     reasons: list[str]
     answers: dict[str, Any]
     facts: dict[str, Any]
@@ -127,14 +129,16 @@ class FirstLayerResult:
     jev_input_tokens: int = 0
     near_misses: list[str] = field(default_factory=list)
     thresholds: dict[str, float] = field(default_factory=dict)  # Jev limits used
+    unsure: list[str] = field(default_factory=list)  # why NEEDS_HUMAN (empty otherwise)
 
     @property
     def summary(self) -> str:
         if self.verdict == "REJECT":
             labels = ", ".join(REASON_LABELS.get(r, r) for r in self.reasons)
             return f"Rejected automatically: {labels}."
-        tail = f" Worth a closer look: {'; '.join(self.near_misses)}." if self.near_misses else ""
-        return "Passed the automated checks; needs a human to test the demo." + tail
+        if self.verdict == "APPROVE":
+            return "Passed every automated check. Test the demo as usual."
+        return f"Not sure, needs a human: {'; '.join(self.unsure)}."
 
 
 def jev_asker(settings: Settings) -> JevAsk:
@@ -235,6 +239,9 @@ class FirstLayerReviewer:
                 f"modern AI CSS signals {len(css_signals)} (limit {AI_CSS_REJECT_AT}: "
                 f"{', '.join(css_signals)})"
             )
+        unsure = [] if verdict == "REJECT" else _unsure_reasons(answers, facts, evidence, near)
+        if verdict != "REJECT":
+            verdict = "NEEDS_HUMAN" if unsure else "APPROVE"
         result = FirstLayerResult(
             verdict=verdict,  # type: ignore[arg-type]
             reasons=reasons,
@@ -246,6 +253,7 @@ class FirstLayerReviewer:
             jev_input_tokens=tokens,
             near_misses=near,
             thresholds=dict(self._thresholds),
+            unsure=unsure,
         )
         logger.info(
             "First-layer %s for cert %s: %s (jev %d tokens)",
@@ -255,6 +263,51 @@ class FirstLayerReviewer:
             tokens,
         )
         return result
+
+
+# Jev questions that never reject on their own but make Clanker unsure when they're high.
+CONTEXT_FLAGS = {
+    "demo_not_testable": (0.6, "the demo might not let reviewers try it"),
+    "not_eligible": (0.5, "it might not be eligible"),
+}
+FORGES_WITH_CODE = ("github", "gitlab", "gitea")
+
+
+def _unsure_reasons(
+    answers: dict[str, Any], facts: dict[str, Any], evidence: dict[str, Any], near: list[str]
+) -> list[str]:
+    """Why a non-rejected ship needs a human: near misses, or evidence Clanker couldn't get."""
+    out = [f"close to the limit: {n}" for n in near]
+    for key, (limit, text) in CONTEXT_FLAGS.items():
+        if (answers.get(key) or {}).get("noul", 0) >= limit:
+            out.append(f"{text} ({answers[key]['noul']:.2f})")
+    if facts.get("previously_rejected") and (answers.get("feedback_ignored") or {}).get(
+        "noul", 0
+    ) >= 0.7:
+        out.append("the last rejection's feedback may not be addressed")
+    ptype = answers.get("project_type") or {}
+    if ptype.get("confidence", 1) < 0.5:
+        out.append("couldn't tell what kind of project it is")
+    if facts.get("readme_unverified"):
+        out.append("couldn't reach the repo host to read the README")
+    if not facts.get("demo_url_present"):
+        out.append("there's no demo link")
+    else:
+        if facts.get("demo_challenge"):
+            out.append("the demo is behind a bot check, so it wasn't looked at")
+        elif not facts.get("demo_rendered"):
+            out.append("the demo page couldn't be loaded")
+    banner = facts.get("banner_label") or ""
+    if banner == "unclear" or banner.startswith(("unavailable", "error")):
+        out.append("couldn't tell what the banner shows")
+    host = facts.get("repo_host")
+    if host not in FORGES_WITH_CODE:
+        out.append(f"code isn't read on {host if host != 'unknown' else 'this repo host'}")
+    elif not evidence.get("files") and (facts.get("tree_code_files_v2") or 0) > 0:
+        out.append("couldn't read the code")
+    if host in ("github", "gitlab") and not facts.get("commit_history"):
+        out.append("couldn't check the commit history")
+    return out
 
 
 def _check(status: CheckStatus, details: str) -> CheckResult:
@@ -305,10 +358,12 @@ def to_review_output(result: FirstLayerResult) -> ReviewOutput:
             special_flags=flags or None,
         )
     return ReviewOutput(
-        verdict=ReviewVerdict.FLAG_FOR_HUMAN,
+        verdict=(
+            ReviewVerdict.APPROVE if result.verdict == "APPROVE" else ReviewVerdict.FLAG_FOR_HUMAN
+        ),
         project_type=result.project_type,
         checks=ChecksResult(**rows),
         reasoning=result.summary,
-        feedback=[f"Near the limit: {n}" for n in result.near_misses] or None,
+        feedback=result.unsure or None,
         special_flags=flags or None,
     )

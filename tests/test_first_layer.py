@@ -65,12 +65,13 @@ async def packet_for(client, dashboard, **overrides):
     return await build_packet(client, "c1")
 
 
-async def test_first_layer_passes_clean_submission_to_human(client, dashboard):
+async def test_first_layer_near_miss_needs_a_human(client, dashboard):
     calls: list = []
     packet = await packet_for(client, dashboard)
     result = await make_reviewer(jev_answers(ai_code=0.6), calls).review(packet)
 
-    assert result.verdict == "PASS"
+    assert result.verdict == "NEEDS_HUMAN"
+    assert "close to the limit: AI-heavy code 0.60 (limit 0.7)" in result.unsure
     assert result.reasons == []
     assert result.message is None
     assert result.jev_input_tokens == 1234
@@ -81,9 +82,44 @@ async def test_first_layer_passes_clean_submission_to_human(client, dashboard):
 
     review = to_review_output(result)
     assert review.verdict == ReviewVerdict.FLAG_FOR_HUMAN
+    assert review.feedback == result.unsure
     assert review.checks.readme_is_raw_github.status == CheckStatus.PASS
     # Unchecked rubric rows are skipped for the human, never passed.
     assert review.checks.commit_authorship.status == CheckStatus.SKIP
+
+
+HISTORY_OK = {"total_commits": 12, "pre_cutoff_commits": 0, "pre_cutoff_own_commits": 0}
+RENDER_OK = {"ok": True, "final_url": "https://example.com", "status_code": 200,
+             "rendered_text": "Welcome to my app"}  # fmt: skip
+
+
+async def test_first_layer_clean_submission_approves(client, dashboard):
+    packet = await packet_for(client, dashboard)
+    packet.demo_render = RENDER_OK
+    result = await make_reviewer(jev_answers(), history=HISTORY_OK).review(packet)
+
+    assert result.verdict == "APPROVE", result.unsure
+    assert result.unsure == []
+    assert to_review_output(result).verdict == ReviewVerdict.APPROVE
+
+
+@pytest.mark.parametrize(
+    ("change", "why"),
+    [
+        ({"history": None}, "couldn't check the commit history"),
+        ({"render": None}, "the demo page couldn't be loaded"),
+        ({"answers": {"demo_not_testable": 0.8}}, "the demo might not let reviewers try it (0.80)"),
+    ],
+)
+async def test_missing_evidence_or_context_flags_need_a_human(client, dashboard, change, why):
+    packet = await packet_for(client, dashboard)
+    packet.demo_render = change.get("render", RENDER_OK)
+    reviewer = make_reviewer(
+        jev_answers(**change.get("answers", {})), history=change.get("history", HISTORY_OK)
+    )
+    result = await reviewer.review(packet)
+    assert result.verdict == "NEEDS_HUMAN"
+    assert why in result.unsure
 
 
 async def test_first_layer_rejects_over_threshold_with_message(client, dashboard):

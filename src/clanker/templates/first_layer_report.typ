@@ -43,6 +43,7 @@
 #let reasons     = data.at("reasons", default: ())
 #let message     = data.at("message", default: "")
 #let near_misses = data.at("near_misses", default: ())
+#let unsure      = data.at("unsure", default: ())
 #let jev_rows    = data.at("jev", default: ())
 #let code_checks = data.at("code_checks", default: ())
 
@@ -66,7 +67,7 @@
 #let sans = ("Noto Sans", "Liberation Sans", "DejaVu Sans")
 #let mono = ("JetBrainsMono Nerd Font", "DejaVu Sans Mono", "Liberation Mono")
 
-#let verdict-color = if verdict == "REJECT" { hc-red } else { hc-purple }
+#let verdict-color = if verdict == "REJECT" { hc-red } else if verdict == "APPROVE" { hc-green } else { hc-purple }
 #let status-color(s) = {
   if s == "pass" { hc-green } else if s == "fail" { hc-red } else if s == "warn" { hc-orange } else { hc-slate }
 }
@@ -180,14 +181,15 @@
     ]
   ]
 ] else [
-  = What the human should look at
-  #card(color: hc-purple)[
-    #text(fill: hc-smoke, size: 9.5pt)[Nothing was clear enough to reject automatically. Test the demo as usual.]
-    #if near_misses.len() > 0 [
-      #v(6pt)
-      #text(fill: hc-orange, weight: "bold", size: 9.5pt)[Close to the limit, worth a look:]
-      #v(2pt)
-      #list(..near_misses.map(n => text(fill: hc-smoke, size: 9pt)[#n]))
+  #if verdict == "APPROVE" [
+    = All checks passed
+    #card(color: hc-green)[
+      #text(fill: hc-smoke, size: 9.5pt)[Everything Clanker checks passed. Test the demo as usual.]
+    ]
+  ] else [
+    = Why Clanker isn't sure
+    #card(color: hc-purple)[
+      #list(..unsure.map(n => text(fill: hc-smoke, size: 9.5pt)[#n]))
     ]
   ]
 ]

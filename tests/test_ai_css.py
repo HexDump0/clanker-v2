@@ -61,7 +61,7 @@ async def test_few_signals_pass_with_a_near_miss_note(client, dashboard):
     packet = await packet_for(client, dashboard)
     result = await make_reviewer(jev_answers(), files=css_file(css)).review(packet)
 
-    assert result.verdict == "PASS"
+    assert result.verdict == "NEEDS_HUMAN"
     assert any("modern AI CSS signals 4" in note for note in result.near_misses)
 
 
