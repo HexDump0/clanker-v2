@@ -63,3 +63,22 @@ async def test_few_signals_pass_with_a_near_miss_note(client, dashboard):
 
     assert result.verdict == "PASS"
     assert any("modern AI CSS signals 4" in note for note in result.near_misses)
+
+
+async def test_report_data_explains_the_css_reject(client, dashboard):
+    from clanker.review.first_layer.report import build_report_data
+
+    packet = await packet_for(client, dashboard)
+    reviewer = make_reviewer(jev_answers(ai_code=0.67), files=css_file(MODERN_AI_CSS))
+    result = await reviewer.review(packet)
+    data = build_report_data(result, packet)
+
+    assert data["verdict"] == "REJECT"
+    (reason,) = data["reasons"]
+    assert reason["label"] == "AI-heavy code"
+    assert any(e.startswith("Code rule:") for e in reason["evidence"])
+    assert data["message"]
+    jev = {row["name"]: row for row in data["jev"]}
+    assert jev["Code/CSS mostly AI-generated"]["status"] == "warn"  # 0.67, under the limit
+    checks = {row["name"]: row["status"] for row in data["code_checks"]}
+    assert checks["Modern AI CSS style"] == "fail"

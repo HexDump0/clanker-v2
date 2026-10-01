@@ -194,7 +194,11 @@ def test_every_reject_reason_gets_a_scene_without_any_pages(reason):
 
 async def test_runner_makes_a_card_video_when_no_page_can_be_shown(monkeypatch, tmp_path):
     packet = SimpleNamespace(
-        cert=SimpleNamespace(project_name="P", description="", repo_url=None, demo_url=None)
+        cert=SimpleNamespace(
+            project_name="P", description="", repo_url=None, demo_url=None, readme_url=None
+        ),
+        stardance_url=None,
+        readme_source=None,
     )
     result = FirstLayerResult(
         verdict="REJECT",
@@ -218,7 +222,7 @@ async def test_runner_makes_a_card_video_when_no_page_can_be_shown(monkeypatch, 
         return SimpleNamespace(video=SimpleNamespace(path=kwargs["output_path"]))
 
     monkeypatch.setattr("clanker.review.runner.build_packet", fake_packet)
-    monkeypatch.setattr("clanker.review.runner.generate_review_pdf", fake_pdf)
+    monkeypatch.setattr("clanker.review.runner.generate_first_layer_pdf", fake_pdf)
     monkeypatch.setattr("clanker.review.runner.generate_reject_video", fake_video)
     reviewer = SimpleNamespace(review=lambda p: _done(result))
     runner = ReviewRunner(

@@ -12,10 +12,12 @@ import json
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from clanker.review.models import ReviewOutput
 
 TEMPLATE_PATH = Path(__file__).resolve().parent.parent / "templates" / "review_report.typ"
+FIRST_LAYER_TEMPLATE_PATH = TEMPLATE_PATH.with_name("first_layer_report.typ")
 COMPILE_TIMEOUT = 30.0
 
 
@@ -46,12 +48,6 @@ async def generate_review_pdf(
         "feedback": review.feedback or [],
         "special_flags": review.special_flags or [],
     }
-    review_date = datetime.now(UTC).strftime("%-m/%-d/%y %-H:%M UTC")
-
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
-        f.write(json.dumps(data))
-        data_file = Path(f.name)
-
     inputs = {
         "verdict": review.verdict.value,
         "project_type": review.project_type,
@@ -61,13 +57,49 @@ async def generate_review_pdf(
         "project_name": project_name,
         "project_desc": project_desc,
         "project_url": _strip_scheme(project_url),
-        "review_date": review_date,
+    }
+    return await _compile(TEMPLATE_PATH, inputs, data, output_path)
+
+
+async def generate_first_layer_pdf(
+    data: dict[str, Any],
+    *,
+    output_path: Path,
+    project_name: str,
+    project_desc: str,
+    repo_url: str | None,
+    demo_url: str | None,
+    readme_url: str | None,
+    project_url: str | None = None,
+) -> Path:
+    """The first-layer report (reasons + evidence, message, Jev scores, code checks)."""
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    inputs = {
+        "project_name": project_name,
+        "project_desc": project_desc,
+        "repo_url": _strip_scheme(repo_url),
+        "demo_url": _strip_scheme(demo_url),
+        "readme_url": _strip_scheme(readme_url),
+        "project_url": _strip_scheme(project_url),
+    }
+    return await _compile(FIRST_LAYER_TEMPLATE_PATH, inputs, data, output_path)
+
+
+async def _compile(
+    template: Path, inputs: dict[str, str], data: dict[str, Any], output_path: Path
+) -> Path:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+        f.write(json.dumps(data))
+        data_file = Path(f.name)
+    inputs = {
+        **inputs,
+        "review_date": datetime.now(UTC).strftime("%-m/%-d/%y %-H:%M UTC"),
         "data_file": str(data_file),
     }
     args = ["compile", "--root", "/"]
     for key, value in inputs.items():
         args += ["--input", f"{key}={value}"]
-    args += [str(TEMPLATE_PATH), str(output_path)]
+    args += [str(template), str(output_path)]
 
     try:
         proc = await asyncio.create_subprocess_exec(

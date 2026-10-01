@@ -122,6 +122,7 @@ class FirstLayerResult:
     video_inputs: RejectVideoInputs
     jev_input_tokens: int = 0
     near_misses: list[str] = field(default_factory=list)
+    thresholds: dict[str, float] = field(default_factory=dict)  # Jev limits used
 
     @property
     def summary(self) -> str:
@@ -240,6 +241,7 @@ class FirstLayerReviewer:
             video_inputs=video_inputs,
             jev_input_tokens=tokens,
             near_misses=near,
+            thresholds=dict(self._thresholds),
         )
         logger.info(
             "First-layer %s for cert %s: %s (jev %d tokens)",

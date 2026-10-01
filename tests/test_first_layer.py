@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 from types import SimpleNamespace
 from typing import Any
 
@@ -122,7 +123,7 @@ def fake_artifacts(monkeypatch, packet, videos: list) -> None:
         return SimpleNamespace(video=SimpleNamespace(path=path))
 
     monkeypatch.setattr("clanker.review.runner.build_packet", fake_packet)
-    monkeypatch.setattr("clanker.review.runner.generate_review_pdf", fake_pdf)
+    monkeypatch.setattr("clanker.review.runner.generate_first_layer_pdf", fake_pdf)
     monkeypatch.setattr("clanker.review.runner.generate_reject_video", fake_reject_video)
 
 
@@ -205,3 +206,23 @@ async def test_runner_first_layer_video_failure_keeps_verdict(
 def test_runner_requires_a_reviewer(tmp_path):
     with pytest.raises(ValueError):
         ReviewRunner(client=object(), settings=runner_settings(tmp_path))  # type: ignore[arg-type]
+
+
+@pytest.mark.skipif(shutil.which("typst") is None, reason="typst not installed")
+@pytest.mark.parametrize("scores", [{"ai_readme": 0.95}, {"ai_code": 0.6}])
+async def test_first_layer_pdf_compiles(tmp_path, client, dashboard, scores):
+    from clanker.review.first_layer.report import build_report_data
+    from clanker.review.pdf import generate_first_layer_pdf
+
+    packet = await packet_for(client, dashboard)
+    result = await make_reviewer(jev_answers(**scores)).review(packet)
+    path = await generate_first_layer_pdf(
+        build_report_data(result, packet),
+        output_path=tmp_path / "fl.pdf",
+        project_name="Test \"Project\" #1 [x]",
+        project_desc="Has $pecial *chars* _here_",
+        repo_url="https://github.com/x/y",
+        demo_url="https://example.com",
+        readme_url=RAW_README,
+    )
+    assert path.read_bytes()[:5] == b"%PDF-"

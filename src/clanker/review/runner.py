@@ -22,9 +22,10 @@ from pydantic_ai import Agent
 
 from clanker.config import Settings
 from clanker.review.first_layer import FirstLayerResult, FirstLayerReviewer, to_review_output
+from clanker.review.first_layer.report import build_report_data
 from clanker.review.models import ReviewOutput, ReviewVerdict
 from clanker.review.packet import ReviewPacket, build_packet
-from clanker.review.pdf import PdfError, generate_review_pdf
+from clanker.review.pdf import PdfError, generate_first_layer_pdf, generate_review_pdf
 from clanker.review.tools import ReviewTools
 from clanker.review.video.compositor import DEFAULT_MUSIC
 from clanker.review.video.director import Director
@@ -151,7 +152,20 @@ class ReviewRunner:
     ) -> ReviewOutcome:
         result = await reviewer.review(packet)
         review = to_review_output(result)
-        pdf_path = await self._render_pdf(cert_id, packet, review)
+        pdf_path: Path | None = None
+        try:
+            pdf_path = await generate_first_layer_pdf(
+                build_report_data(result, packet),
+                output_path=self._settings.pdf_dir / f"{cert_id}.pdf",
+                project_name=packet.cert.project_name,
+                project_desc=packet.cert.description or "",
+                repo_url=packet.cert.repo_url,
+                demo_url=packet.cert.demo_url,
+                readme_url=packet.cert.readme_url,
+                project_url=packet.stardance_url,
+            )
+        except PdfError:
+            logger.exception("PDF generation failed for cert %s", cert_id)
 
         video_path: Path | None = None
         video_error: str | None = None
