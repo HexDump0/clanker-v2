@@ -133,10 +133,13 @@ async def flag_manual_review(ctx: AppContext, record) -> None:
         parent_ts=record.slack_ts,
         note=fb.note if fb else "",
         wrong_reasons=[labels.get(c, c) for c in (fb.wrong_checks if fb else [])],
+        by=fb.by_name if fb else None,
     )
 
 
-async def review_for_extension(ctx: AppContext, cert_id: str) -> None:
+async def review_for_extension(
+    ctx: AppContext, cert_id: str, requested_by: str | None = None
+) -> None:
     """A review requested from the browser extension: Slack updates, then the review itself.
 
     Slack trouble never blocks the review; a failed review is re-raised so the extension
@@ -150,7 +153,9 @@ async def review_for_extension(ctx: AppContext, cert_id: str) -> None:
     if ctx.announcer is not None:
         try:
             cert = await ctx.client.get_certification(cert_id)
-            parent_ts = await ctx.announcer.announce_review_request(cert, rereview=rereview)
+            parent_ts = await ctx.announcer.announce_review_request(
+                cert, rereview=rereview, requested_by=requested_by
+            )
         except Exception:
             logger.exception("Could not announce extension review for cert %s", cert_id)
     try:
@@ -159,6 +164,8 @@ async def review_for_extension(ctx: AppContext, cert_id: str) -> None:
         if parent_ts is not None and ctx.announcer is not None:
             await ctx.announcer.post_failure(parent_ts)
         raise
+    if requested_by:
+        ResultStore(ctx.settings.results_dir).set_requested_by(cert_id, requested_by)
     if parent_ts is not None:
         _remember_thread(ctx, cert_id, parent_ts)
     if parent_ts is not None and cert is not None and ctx.announcer is not None:
@@ -362,7 +369,7 @@ async def run_all(settings: Settings) -> None:
                         run_extension_api,
                         settings,
                         ResultStore(settings.results_dir),
-                        lambda cert_id: review_for_extension(ctx, cert_id),
+                        lambda cert_id, who: review_for_extension(ctx, cert_id, who),
                         lambda record: flag_manual_review(ctx, record),
                     ),
                     name="extension-api",

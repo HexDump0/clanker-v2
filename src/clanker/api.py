@@ -2,7 +2,10 @@
 
 Auth is the caller's own Dashboard session token (``Authorization: Bearer <token>``). It is
 only *validated*: one read-only workplace request proves it is a live session with Dashboard
-access. It is cached (hashed) for a few minutes and never stored or used for anything else.
+access. The result is cached (hashed) for a few minutes; the token is never stored or used for
+anything else. Who the caller is comes from the claims in that validated token (``identity``).
+Everything the server itself does on the Dashboard (reviews, Slack, the watcher) uses the
+credentials in ``.env``, never a caller's token.
 The only writes are right/wrong labels ("wrong" flags the ship for manual review and tells Slack)
 and queueing a Clanker review a user asked for. The extension attaches videos itself, from the
 dashboard page, with the user's own session. A human submits the verdict in the dashboard.
@@ -20,15 +23,19 @@ from typing import Any
 
 from aiohttp import web
 
+from clanker.budget import UsageLimiter
 from clanker.config import Settings
+from clanker.identity import Identity, identity_from_token, token_expired
 from clanker.results import ResultRecord, ResultStore, is_valid_id
 from clanker.shipwrights import ShipwrightsClient
 from clanker.shipwrights.client import AuthenticationError, ShipwrightsError
 
-TokenValidator = Callable[[str], Awaitable[bool]]
-ReviewFn = Callable[[str], Awaitable[object]]
+TokenValidator = Callable[[str], Awaitable["Identity | None"]]
+ReviewFn = Callable[[str, "str | None"], Awaitable[object]]
 ManualReviewFn = Callable[[ResultRecord], Awaitable[object]]
 VALID_TTL = 300.0
+INVALID_TTL = 60.0  # remember bad tokens so strangers can't make us hammer the Dashboard
+MAX_AUTH_FAILURES = 20  # per client IP per minute
 REVIEW_COOLDOWN = 60.0  # seconds before the same cert can be re-requested
 
 logger = logging.getLogger(__name__)
@@ -39,6 +46,9 @@ VALIDATOR = web.AppKey("validator", Callable)
 JOBS = web.AppKey("jobs", object)
 FLAG = web.AppKey("flag", object)
 AUTH_CACHE = web.AppKey("auth_cache", dict)
+AUTH_FAILS = web.AppKey("auth_fails", dict)
+LIMITER = web.AppKey("limiter", object)
+BG = web.AppKey("bg", set)
 
 
 class ReviewJobs:
@@ -62,20 +72,20 @@ class ReviewJobs:
             return 0.0
         return max(0.0, entry["finished"] + REVIEW_COOLDOWN - time.monotonic())
 
-    def start(self, cert_id: str) -> bool:
+    def start(self, cert_id: str, who: str | None = None) -> bool:
         """Begin a review; False if one is already running for this cert."""
         if self.status(cert_id)["state"] == "running":
             return False
         self._status[cert_id] = {"state": "running"}
-        task = asyncio.create_task(self._run(cert_id), name=f"ext-review-{cert_id}")
+        task = asyncio.create_task(self._run(cert_id, who), name=f"ext-review-{cert_id}")
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
         return True
 
-    async def _run(self, cert_id: str) -> None:
+    async def _run(self, cert_id: str, who: str | None) -> None:
         try:
             async with self._semaphore:
-                await self._review(cert_id)
+                await self._review(cert_id, who)
             self._status[cert_id] = {"state": "idle", "finished": time.monotonic()}
         except Exception as exc:
             logger.exception("Extension-requested review failed for cert %s", cert_id)
@@ -87,9 +97,11 @@ class ReviewJobs:
 
 
 def dashboard_validator(settings: Settings) -> TokenValidator:
-    """Check a token against the real Dashboard (read-only) without keeping it."""
+    """Check a token against the real Dashboard (read-only); returns who it belongs to."""
 
-    async def validate(token: str) -> bool:
+    async def validate(token: str) -> Identity | None:
+        if token_expired(token):
+            return None  # no need to bother the Dashboard
         try:
             async with ShipwrightsClient(
                 base_url=settings.shipwrights_base_url,
@@ -97,26 +109,47 @@ def dashboard_validator(settings: Settings) -> TokenValidator:
                 workplace=settings.shipwrights_workplace,
             ) as sw:
                 await sw.get_workplace()
-            return True
         except AuthenticationError:
-            return False
+            return None
         except ShipwrightsError:
             logger.warning("Dashboard error while validating a token", exc_info=True)
-            return False
+            return None
+        # The Dashboard accepted the token, so the claims inside it are genuine.
+        return identity_from_token(token) or Identity(
+            id="u-" + hashlib.sha256(token.encode()).hexdigest()[:12], name="a reviewer"
+        )
 
     return validate
 
 
-async def _is_valid(app: web.Application, token: str) -> bool:
+def _client_ip(request: web.Request) -> str:
+    if request.app[SETTINGS].extension_api_trust_proxy:
+        forwarded = request.headers.get("X-Forwarded-For", "")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
+    return request.remote or "?"
+
+
+def _too_many_failures(app: web.Application, ip: str) -> bool:
+    now = time.monotonic()
+    recent = [t for t in app[AUTH_FAILS].get(ip, []) if now - t < 60.0]
+    app[AUTH_FAILS][ip] = recent
+    return len(recent) >= MAX_AUTH_FAILURES
+
+
+async def _identify(app: web.Application, token: str) -> Identity | None:
     key = hashlib.sha256(token.encode()).hexdigest()
-    cache: dict[str, float] = app[AUTH_CACHE]
-    if cache.get(key, 0.0) > time.monotonic():
-        return True
-    if not await app[VALIDATOR](token):
-        cache.pop(key, None)
-        return False
-    cache[key] = time.monotonic() + VALID_TTL
-    return True
+    cache: dict[str, tuple[float, Identity | None]] = app[AUTH_CACHE]
+    hit = cache.get(key)
+    if hit and hit[0] > time.monotonic():
+        return hit[1]
+    identity = await app[VALIDATOR](token)
+    ttl = VALID_TTL if identity else INVALID_TTL
+    cache[key] = (time.monotonic() + ttl, identity)
+    if len(cache) > 2000:  # keep memory bounded
+        for k in [k for k, (exp, _) in cache.items() if exp < time.monotonic()]:
+            del cache[k]
+    return identity
 
 
 @web.middleware
@@ -131,9 +164,28 @@ async def _auth_and_cors(request: web.Request, handler: Any) -> web.StreamRespon
     }
     if request.method == "OPTIONS":
         return web.Response(headers=cors)
+    if request.path == "/healthz":  # for the proxy / uptime checks; reveals nothing
+        return web.json_response({"ok": True}, headers=cors)
+    ip = _client_ip(request)
+    if _too_many_failures(request.app, ip):
+        return web.json_response(
+            {"error": "too many failed attempts, slow down"}, status=429, headers=cors
+        )
     supplied = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
-    if not supplied or not await _is_valid(request.app, supplied):
+    identity = await _identify(request.app, supplied) if supplied else None
+    if identity is None:
+        request.app[AUTH_FAILS].setdefault(ip, []).append(time.monotonic())
         return web.json_response({"error": "unauthorized"}, status=401, headers=cors)
+    allowed = {
+        u.strip().lower()
+        for u in request.app[SETTINGS].extension_allowed_users.split(",")
+        if u.strip()
+    }
+    if allowed and not identity.matches(allowed):
+        return web.json_response(
+            {"error": "your account isn't allowed to use Clanker"}, status=403, headers=cors
+        )
+    request["user"] = identity
     try:
         response = await handler(request)
     except web.HTTPException as exc:
@@ -199,13 +251,14 @@ async def post_feedback(request: web.Request) -> web.Response:
             agreement,
             note=str(body.get("note", "")),
             wrong_checks=[str(c) for c in body.get("wrong_checks", [])],
+            by=(request["user"].id, request["user"].name),
         )
     flag: ManualReviewFn | None = request.app[FLAG]
     if record.manual_review and not previous.manual_review and flag is not None:
         # Only on the change into "wrong", so editing the note doesn't re-notify everyone.
         task = asyncio.create_task(_flag(flag, record), name=f"manual-review-{cert_id}")
-        request.app.setdefault("_bg", set()).add(task)
-        task.add_done_callback(request.app["_bg"].discard)
+        request.app[BG].add(task)
+        task.add_done_callback(request.app[BG].discard)
     return web.json_response(record.model_dump(mode="json"))
 
 
@@ -230,13 +283,25 @@ async def post_review(request: web.Request) -> web.Response:
         return web.json_response({"error": "reviews cannot be requested here"}, status=503)
     if not is_valid_id(cert_id):
         return web.json_response({"error": "invalid cert id"}, status=400)
+    if jobs.status(cert_id)["state"] == "running":
+        return web.json_response(jobs.status(cert_id), status=202)  # already on it; no charge
     wait = jobs.cooldown_left(cert_id)
     if wait > 0:
         return web.json_response(
             {"error": f"reviewed a moment ago, try again in {wait:.0f}s"}, status=429
         )
-    jobs.start(cert_id)  # already running: just report running
+    user: Identity = request["user"]
+    if over := request.app[LIMITER].try_use(user.id):
+        return web.json_response({"error": over}, status=429)
+    jobs.start(cert_id, user.name)
     return web.json_response(jobs.status(cert_id), status=202)
+
+
+async def get_me(request: web.Request) -> web.Response:
+    user: Identity = request["user"]
+    return web.json_response(
+        {"id": user.id, "name": user.name, "reviews_left": request.app[LIMITER].left(user.id)}
+    )
 
 
 async def get_review_status(request: web.Request) -> web.Response:
@@ -252,14 +317,23 @@ def build_api(
     validator: TokenValidator | None = None,
     review: ReviewFn | None = None,
     on_manual_review: ManualReviewFn | None = None,
+    limiter: UsageLimiter | None = None,
 ) -> web.Application:
     app = web.Application(middlewares=[_auth_and_cors])
     app[STORE] = store
     app[SETTINGS] = settings
     app[VALIDATOR] = validator or dashboard_validator(settings)
     app[AUTH_CACHE] = {}
+    app[AUTH_FAILS] = {}
+    app[BG] = set()
+    app[LIMITER] = limiter or UsageLimiter(
+        settings.extension_usage_file,
+        per_user=settings.extension_reviews_per_user_per_day,
+        per_day=settings.extension_reviews_per_day,
+    )
     app[FLAG] = on_manual_review
     app[JOBS] = ReviewJobs(review, settings.max_concurrent_reviews) if review else None
+    app.router.add_get("/api/me", get_me)
     app.router.add_get("/api/results", list_results)
     app.router.add_get("/api/feedback.jsonl", get_feedback_export)
     app.router.add_get("/api/results/{cert_id}", get_result)

@@ -8,6 +8,7 @@ from aiohttp.test_utils import TestClient, TestServer
 
 from clanker.api import build_api
 from clanker.config import Settings
+from clanker.identity import Identity
 from clanker.results import ResultStore
 from clanker.review.models import ReviewVerdict
 from clanker.shipwrights import ShipwrightsClient
@@ -17,9 +18,12 @@ AUTH = {"Authorization": f"Bearer {TOKEN}"}
 VALIDATIONS: list[str] = []
 
 
-async def fake_validator(token: str) -> bool:
+USER = Identity(id="u1", name="Tester", slack_id="U123", slack_username="tester")
+
+
+async def fake_validator(token: str) -> Identity | None:
     VALIDATIONS.append(token)
-    return token == TOKEN
+    return USER if token == TOKEN else None
 
 
 def make_outcome(cert_id="c1", verdict="REJECT", video=None):
@@ -89,7 +93,7 @@ async def test_valid_token_is_cached_but_bad_one_is_rechecked(api):
     bad = {"Authorization": "Bearer nope"}
     await api.get("/api/results", headers=bad)
     await api.get("/api/results", headers=bad)
-    assert VALIDATIONS.count("nope") == 2
+    assert VALIDATIONS.count("nope") == 1  # bad tokens are remembered too (no Dashboard hammering)
     assert (await api.get(f"/api/results?token={TOKEN}")).status == 401
 
 
@@ -108,8 +112,9 @@ async def test_dashboard_validator_accepts_live_session_and_rejects_401(monkeypa
         lambda self, **kw: real_init(self, **{**kw, "transport": httpx.MockTransport(handler)}),
     )
     validate = dashboard_validator(Settings(shipwrights_session="x"))
-    assert await validate("good") is True
-    assert await validate("bad") is False
+    good = await validate("good")
+    assert good is not None and good.name == "a reviewer"  # not a JWT: generic identity
+    assert await validate("bad") is None
 
 
 async def test_request_review_runs_once_then_cools_down(store):
@@ -118,7 +123,7 @@ async def test_request_review_runs_once_then_cools_down(store):
     release = asyncio.Event()
     calls: list[str] = []
 
-    async def review(cert_id: str) -> None:
+    async def review(cert_id: str, who: str | None = None) -> None:
         calls.append(cert_id)
         await release.wait()
         store.save_outcome(make_outcome(cert_id))
@@ -144,7 +149,7 @@ async def test_request_review_runs_once_then_cools_down(store):
 
 
 async def test_failed_review_reports_error(store):
-    async def review(cert_id: str) -> None:
+    async def review(cert_id: str, who: str | None = None) -> None:
         raise RuntimeError("cert not found")
 
     app = build_api(Settings(shipwrights_session="x"), store, fake_validator, review)

@@ -200,6 +200,26 @@ class Settings(BaseSettings):
     extension_api_host: str = Field(
         default="127.0.0.1", description="Bind address. Use 0.0.0.0 behind a TLS proxy to host it."
     )
+    extension_api_trust_proxy: bool = Field(
+        default=False,
+        description="Read the client IP from X-Forwarded-For (only behind a proxy you control).",
+    )
+    extension_allowed_users: str = Field(
+        default="",
+        description=(
+            "Comma-separated dashboard user ids / Slack ids / Slack usernames allowed to use the "
+            "extension API. Empty = any validated Dashboard user."
+        ),
+    )
+    extension_reviews_per_user_per_day: int = Field(
+        default=10, ge=0, description="Reviews one person may request per UTC day (0 = unlimited)."
+    )
+    extension_reviews_per_day: int = Field(
+        default=100,
+        ge=0,
+        description="Reviews all extension users may request per UTC day (0 = unlimited).",
+    )
+    extension_usage_file: Path = Path("data/extension_usage.json")
     extension_api_port: int = Field(default=8765, ge=1024, le=65535)
     github_token: str = Field(
         default="", description="Optional; raises GitHub API rate limits for review tools."

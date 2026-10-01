@@ -317,7 +317,9 @@ class Announcer:
         )
         return ts
 
-    async def announce_review_request(self, cert: CertSummary, *, rereview: bool) -> str:
+    async def announce_review_request(
+        self, cert: CertSummary, *, rereview: bool, requested_by: str | None = None
+    ) -> str:
         """A review someone asked for from the browser extension; returns the thread parent ts.
 
         One message, no ping: the original ship was already announced (or the person asking
@@ -331,7 +333,10 @@ class Announcer:
         await self._slack.chat_postMessage(
             channel=self._channel,
             thread_ts=ts,
-            text=f"{label} from the browser extension. Running the automated review..",
+            text=(
+                f"{label}{f' by {requested_by}' if requested_by else ''} from the browser "
+                "extension. Running the automated review.."
+            ),
         )
         return ts
 
@@ -343,11 +348,12 @@ class Announcer:
         parent_ts: str | None,
         note: str,
         wrong_reasons: list[str],
+        by: str | None = None,
     ) -> None:
         """A human marked Clanker's review wrong: ask the reviewers to do this one by hand."""
         lines = [
             ":rotating_light: *Clanker got this one wrong, please review manually.* "
-            f"<{self._cert_link(cert_id)}|{project_name}>"
+            f"<{self._cert_link(cert_id)}|{project_name}>" + (f" (marked by {by})" if by else "")
         ]
         if wrong_reasons:
             lines.append("Marked wrong: " + ", ".join(wrong_reasons))

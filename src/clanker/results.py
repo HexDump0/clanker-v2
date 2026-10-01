@@ -31,6 +31,8 @@ class HumanFeedback(BaseModel):
     note: str = ""
     wrong_checks: list[str] = Field(default_factory=list)
     decided_at: str
+    by_id: str | None = None
+    by_name: str | None = None
 
 
 class ResultRecord(BaseModel):
@@ -48,6 +50,7 @@ class ResultRecord(BaseModel):
     pdf_path: str | None = None
     created_at: str
     feedback: HumanFeedback | None = None
+    requested_by: str | None = None  # who asked for this review from the extension
     slack_ts: str | None = None  # thread the review was announced in (for manual-review flags)
 
     @computed_field  # type: ignore[prop-decorator]
@@ -137,6 +140,7 @@ class ResultStore:
         agreement: Literal["right", "wrong"],
         note: str = "",
         wrong_checks: list[str] | None = None,
+        by: tuple[str, str] | None = None,
     ) -> ResultRecord:
         record = self.get(cert_id)
         if record is None:
@@ -146,6 +150,8 @@ class ResultStore:
             note=note.strip(),
             wrong_checks=wrong_checks or [],
             decided_at=datetime.now(UTC).isoformat(),
+            by_id=by[0] if by else None,
+            by_name=by[1] if by else None,
         )
         self._write(record)
         return record
@@ -157,6 +163,12 @@ class ResultStore:
         record.feedback = None
         self._write(record)
         return record
+
+    def set_requested_by(self, cert_id: str, name: str) -> None:
+        record = self.get(cert_id)
+        if record is not None:
+            record.requested_by = name
+            self._write(record)
 
     def set_slack_ts(self, cert_id: str, ts: str) -> None:
         record = self.get(cert_id)

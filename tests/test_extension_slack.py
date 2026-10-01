@@ -45,7 +45,10 @@ async def test_extension_review_announces_then_posts_outcome(tmp_path):
     outcome = make_outcome("c1")
     ctx = make_ctx(tmp_path, announcer, AsyncMock(return_value=outcome))
     await review_for_extension(ctx, "c1")
-    assert announcer.announce_review_request.await_args.kwargs == {"rereview": False}
+    assert announcer.announce_review_request.await_args.kwargs == {
+        "rereview": False,
+        "requested_by": None,
+    }
     assert announcer.post_outcome.await_args.args[1:] == (outcome, "9.9")
 
 
@@ -57,7 +60,10 @@ async def test_extension_re_request_is_flagged_as_rereview(tmp_path):
         post_failure=AsyncMock(),
     )
     await review_for_extension(make_ctx(tmp_path, announcer, AsyncMock()), "c1")
-    assert announcer.announce_review_request.await_args.kwargs == {"rereview": True}
+    assert announcer.announce_review_request.await_args.kwargs == {
+        "rereview": True,
+        "requested_by": None,
+    }
 
 
 async def test_failed_review_posts_failure_and_reraises(tmp_path):
@@ -108,3 +114,31 @@ async def test_flag_manual_review_uses_the_stored_thread(tmp_path):
     kwargs = announcer.post_manual_review.await_args.kwargs
     assert kwargs["parent_ts"] == "7.7" and kwargs["wrong_reasons"] == ["no README"]
     await flag_manual_review(SimpleNamespace(announcer=None), record)  # no Slack: no-op
+
+
+async def test_slack_messages_say_who_asked_and_who_flagged():
+    announcer, slack = make_announcer()
+    cert = CertSummary.model_validate(make_cert("c1"))
+    await announcer.announce_review_request(cert, rereview=False, requested_by="Jo D")
+    assert "Review requested by Jo D" in slack.chat_postMessage.call_args_list[-1].kwargs["text"]
+    await announcer.post_manual_review(
+        "c1", "Project c1", parent_ts=None, note="", wrong_reasons=[], by="Sam"
+    )
+    assert "(marked by Sam)" in slack.chat_postMessage.call_args.kwargs["text"]
+
+
+async def test_extension_review_passes_the_requester_to_slack_and_the_record(tmp_path):
+    announcer = SimpleNamespace(
+        announce_review_request=AsyncMock(return_value="9.9"),
+        post_outcome=AsyncMock(),
+        post_failure=AsyncMock(),
+    )
+    store = ResultStore(tmp_path)
+
+    async def review(cert_id):
+        return store.save_outcome(make_outcome(cert_id)) and make_outcome(cert_id)
+
+    ctx = make_ctx(tmp_path, announcer, review)
+    await review_for_extension(ctx, "c1", "Jo D")
+    assert announcer.announce_review_request.await_args.kwargs["requested_by"] == "Jo D"
+    assert store.get("c1").requested_by == "Jo D"
