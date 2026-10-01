@@ -169,8 +169,8 @@ class Settings(BaseSettings):
     video_dir: Path = Path("data/videos")
     video_work_dir: Path = Path("data/video-runs")
     video_music_enabled: bool = Field(
-        default=True,
-        description="Mix a chill background track into review videos.",
+        default=False,
+        description="Mix a chill background track into review videos. Off by default.",
     )
     video_music_file: Path | None = Field(
         default=None,

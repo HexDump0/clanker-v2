@@ -38,3 +38,10 @@ def test_httpx_exclusions_preserve_existing_patterns_without_duplicates():
 
     assert second == first
     assert second.startswith(r"healthcheck$,")
+
+
+def test_video_music_is_off_by_default_and_can_be_enabled(monkeypatch):
+    monkeypatch.delenv("VIDEO_MUSIC_ENABLED", raising=False)
+    assert Settings(_env_file=None).video_music_enabled is False
+    monkeypatch.setenv("VIDEO_MUSIC_ENABLED", "true")
+    assert Settings(_env_file=None).video_music_enabled is True
