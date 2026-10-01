@@ -220,7 +220,7 @@
       status.className = "hint " + (fb ? (fb.agreement === "right" ? "note-ok" : "note-bad") : "");
       status.textContent = fb
         ? `You marked this: Clanker was ${fb.agreement}.${fb.note ? ` “${fb.note}”` : ""}`
-        : "Your answer improves Clanker. A human still decides the ship.";
+        : "Saved as a label for Clanker's evals. A human still decides the ship.";
     }
     async function send(agreement, text = "", wrong = []) {
       try {
