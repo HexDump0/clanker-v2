@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Clanker judgements</title>
+  <style>
+    :root { color-scheme: dark; --bg: #09090b; --card: #18181b; --line: #3f3f46; --fg: #e4e4e7; --dim: #a1a1aa; }
+    body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.5 system-ui, sans-serif; }
+    main { max-width: 920px; margin: 0 auto; padding: 20px 16px 60px; }
+    header { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 16px; }
+    header h1 { font-size: 18px; margin: 0 auto 0 0; }
+    button, select, input { font: inherit; color: inherit; background: #27272a; border: 1px solid #52525b;
+      border-radius: 6px; padding: 6px 10px; }
+    button { cursor: pointer; } button:hover:not(:disabled) { background: #3f3f46; }
+    button.on { background: #2563eb; border-color: #2563eb; }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px; margin-bottom: 12px; }
+    .card.done { opacity: .55; }
+    .top { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+    .top h2 { font-size: 15px; margin: 0; }
+    .badge { padding: 2px 8px; border-radius: 999px; color: #fff; font-size: 12px; font-weight: 600; }
+    .dim { color: var(--dim); } a { color: #93c5fd; }
+    ul { margin: 6px 0; padding-left: 20px; }
+    pre { white-space: pre-wrap; background: var(--bg); border: 1px solid var(--line); border-radius: 6px;
+      padding: 8px; font: 12px ui-monospace, monospace; }
+    video { width: 100%; max-width: 560px; border-radius: 6px; background: #000; display: block; margin-top: 8px; }
+    .row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+    textarea { width: 100%; background: var(--bg); color: inherit; border: 1px solid var(--line); border-radius: 6px; padding: 6px; font: inherit; }
+    label { display: block; }
+    #msg { color: var(--dim); }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Clanker judgements</h1>
+    <span id="filters"></span>
+    <label class="dim"><input type="checkbox" id="hideDone"> hide reviewed</label>
+    <button id="refresh">Refresh</button>
+    <button id="export">Export feedback</button>
+    <button id="settings">Settings</button>
+  </header>
+  <div id="msg"></div>
+  <div id="list"></div>
+</main>
+<script src="api.js"></script>
+<script src="judgements.js"></script>
+</body>
+</html>
