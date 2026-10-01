@@ -41,6 +41,7 @@ class FakeDashboard:
             "reviewerSlackUsername": "reviewer",
         }
         self.leaderboard: dict[str, Any] = {"entries": []}
+        self.readme: dict[str, Any] = {"status": "ok", "cached": True, "markdown": "# Hi"}
 
     def set_pending(self, certs: list[dict[str, Any]], per_page: int = 50) -> None:
         self.pages = [certs[i : i + per_page] for i in range(0, len(certs), per_page)] or [[]]
@@ -75,9 +76,7 @@ class FakeDashboard:
             if path == f"{prefix}/certifications/{cert_id}":
                 return httpx.Response(200, json=detail)
             if path == f"{prefix}/certifications/{cert_id}/readme":
-                return httpx.Response(
-                    200, json={"status": "ok", "cached": True, "markdown": "# Hi"}
-                )
+                return httpx.Response(200, json=self.readme)
             if path == f"{prefix}/certifications/{cert_id}/claim":
                 body = json.loads(request.content)
                 status = "PENDING" if body.get("unclaim") else "IN_REVIEW"

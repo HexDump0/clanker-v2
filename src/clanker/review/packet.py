@@ -15,6 +15,9 @@ from collections.abc import Awaitable
 from dataclasses import dataclass
 from typing import Any
 
+import httpx
+
+from clanker.forges import fetch_readme, parse_repo
 from clanker.review.tools import ReviewTools
 from clanker.shipwrights import (
     CertDetail,
@@ -46,6 +49,11 @@ class ReviewPacket:
     languages: dict[str, Any] | None = None
     stardance: dict[str, Any] | None = None
     demo_render: dict[str, Any] | None = None
+    # Non-GitHub repos: the dashboard doesn't cache their README, so it is fetched from
+    # the forge. ``readme_source`` is where it came from; ``readme_unverified`` means the
+    # forge couldn't be reached, so a missing README is unknown rather than proven.
+    readme_source: str | None = None
+    readme_unverified: bool = False
 
     @property
     def private_context(self) -> list[str]:
@@ -230,7 +238,14 @@ class ReviewPacket:
             if text := r.get("rendered_text"):
                 lines += ["", "Rendered visible text:", "", "```", text, "```"]
 
-        lines += ["", "## README (cached by dashboard)"]
+        lines += [
+            "",
+            "## README (fetched from the repo host)"
+            if self.readme_source
+            else "## README (cached by dashboard)",
+        ]
+        if self.readme_source:
+            lines.append(f"Source: {self.readme_source}")
         if self.readme_data:
             fetched_at = (
                 self.readme_data.fetched_at.isoformat()
@@ -248,6 +263,8 @@ class ReviewPacket:
                 original = len(self.readme)
                 readme = readme[:README_LIMIT] + f"\n\n... (truncated from {original} chars)"
             lines += ["", "```markdown", readme, "```"]
+        elif self.readme_unverified:
+            lines.append("(README could not be fetched from the repo host — not verified)")
         else:
             lines.append("(README missing or empty — verify with get_github_readme)")
 
@@ -341,10 +358,27 @@ async def build_packet(
         )
     )
 
+    readme = readme_data.markdown if readme_data else ""
+    readme_source: str | None = None
+    readme_unverified = False
+    repo = parse_repo(cert.repo_url)
+    if not readme and repo is not None and repo.kind != "github":
+        try:
+            async with httpx.AsyncClient(
+                timeout=15, headers={"User-Agent": "clanker/0.1"}
+            ) as web:
+                fetched = await fetch_readme(cert.repo_url, cert.readme_url, web)
+            if fetched:
+                readme, readme_source = fetched
+        except httpx.HTTPError:
+            readme_unverified = True
+
     return ReviewPacket(
         cert=cert,
         github=github,
-        readme=readme_data.markdown if readme_data else "",
+        readme=readme,
+        readme_source=readme_source,
+        readme_unverified=readme_unverified,
         readme_data=readme_data,
         feedback_templates=feedback_templates,
         tree=tree,

@@ -15,6 +15,8 @@ from typing import Any
 
 from typesafe_sdk import Choice, Noul
 
+from clanker.forges import parse_repo
+
 # Jev thresholds, fixed before the holdout evaluation ("conservative2"). A reason missing
 # here is still asked but never rejects on its own.
 DEFAULT_THRESHOLDS: dict[str, float] = {
@@ -219,6 +221,8 @@ BUILD_EXT = {
     "android_app": (".apk", ".aab"),
     "cli_tool": (),
 }
+# Forges whose release assets the evidence step reads (missing_build needs them).
+RELEASE_FORGES = ("github", "gitlab", "gitea")
 BAD_BANNERS = {"code_screenshot", "logo_or_text", "ai_generated_art", "unrelated"}
 # Anything suggesting a downloadable or browser-embedded build on the itch.io page.
 ITCH_PLAYABLE = re.compile(
@@ -256,7 +260,9 @@ def code_rules(answers: dict[str, Any], facts: dict[str, Any]) -> list[str]:
     if facts["demo_url_is_repo_url"] and kind not in (None, "hardware"):
         reasons.append("demo_is_repo")
     assets = facts.get("release_assets")
-    if kind in BUILD_EXT and host == "github.com" and assets is not None:
+    demo_repo = parse_repo(demo)
+    on_forge = host == "github.com" or (demo_repo is not None and demo_repo.kind in RELEASE_FORGES)
+    if kind in BUILD_EXT and on_forge and assets is not None:
         # CLI: any release asset counts; desktop/Android need a matching installable format.
         ok = (
             bool(assets)
@@ -292,9 +298,9 @@ def reject_decision(
 ) -> tuple[str, list[str]]:
     """REJECT only when code proves it or a Jev reason clears its threshold; else PASS."""
     reasons: list[str] = []
-    if not facts["readme_present"]:
+    if not facts["readme_present"] and not facts.get("readme_unverified"):
         reasons.append("no_readme")
-    if facts["readme_present"] and not facts["readme_url_is_raw_github"]:
+    if facts["readme_present"] and not facts["readme_url_is_raw"]:
         reasons.append("readme_not_raw")
     if facts["demo_url_rejected_platforms"]:
         reasons.append("bad_hosting")
@@ -314,6 +320,8 @@ def reject_decision(
             continue
         if key == "feedback_ignored" and not facts["previously_rejected"]:
             continue
+        if key in ("ai_readme", "readme_thin") and not facts["readme_present"]:
+            continue  # nothing to judge: missing (no_readme covers it) or unverified
         if key in answers and answers[key]["noul"] >= t:
             reasons.append(key)
     return ("REJECT" if reasons else "PASS"), reasons

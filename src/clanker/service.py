@@ -20,6 +20,7 @@ from clanker.config import Settings, configure_observability
 from clanker.daily import parse_daily_time, seconds_until_utc_time, send_daily_summary
 from clanker.review import ReviewRunner
 from clanker.review.agent import create_chat_agent, create_review_agent
+from clanker.review.first_layer import FirstLayerReviewer
 from clanker.review.tools import ReviewTools
 from clanker.review.video.director import VisionDirector
 from clanker.review.vision import PageRenderer
@@ -54,15 +55,22 @@ def build_app(settings: Settings, *, with_slack: bool = True) -> AppContext:
         renderer=renderer,
         hackclub_ai_key=settings.hackclub_api_key,
     )
-    review_agent = create_review_agent(settings, tools)
-    video_director = VisionDirector(settings) if settings.video_enabled else None
-    runner = ReviewRunner(
-        agent=review_agent,
-        client=client,
-        settings=settings,
-        tools=tools,
-        video_director=video_director,
-    )
+    if settings.review_mode == "first_layer":
+        # Code checks + one Jev call; reject videos are code-directed (no director model).
+        runner = ReviewRunner(
+            first_layer=FirstLayerReviewer(settings),
+            client=client,
+            settings=settings,
+            tools=tools,
+        )
+    else:
+        runner = ReviewRunner(
+            agent=create_review_agent(settings, tools),
+            client=client,
+            settings=settings,
+            tools=tools,
+            video_director=VisionDirector(settings) if settings.video_enabled else None,
+        )
 
     slack: AsyncWebClient | None = None
     announcer: Announcer | None = None
@@ -167,8 +175,8 @@ async def run_slack_service(ctx: AppContext) -> None:
     async def run_review(cert_id: str) -> str:
         """Run the full review pipeline for a cert and return the result as JSON.
 
-        Returns the verdict, reasoning, flags, and the path of the generated
-        PDF report.
+        Returns the verdict, reasoning, flags, the ready-to-send reject message
+        (first-layer rejects only), and the path of the generated PDF report.
         """
         outcome = await ctx.runner.review_cert(cert_id)
         return json.dumps(
@@ -180,6 +188,7 @@ async def run_slack_service(ctx: AppContext) -> None:
                 "reasoning": outcome.review.reasoning,
                 "required_fixes": outcome.review.required_fixes,
                 "special_flags": outcome.review.special_flags,
+                "reject_message": outcome.reject_message,
                 "pdf_path": str(outcome.pdf_path) if outcome.pdf_path else None,
                 "video_path": str(outcome.video_path) if outcome.video_path else None,
                 "video_error": outcome.video_error,

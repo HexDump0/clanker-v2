@@ -470,6 +470,18 @@ class Announcer:
                 except Exception:
                     logger.exception("Failed to post reject ping for cert %s", cert.id)
 
+        if outcome.reject_message:
+            # Template-written (no LLM) and copy-ready; a human sends it from the
+            # dashboard — clanker never calls the mutating reject endpoint.
+            try:
+                await self._slack.chat_postMessage(
+                    channel=self._channel,
+                    thread_ts=parent_ts,
+                    text=f"Reject message:\n```{outcome.reject_message}```",
+                )
+            except Exception:
+                logger.exception("Failed to post reject message for cert %s", cert.id)
+
         if outcome.pdf_path:
             await self._slack.files_upload_v2(
                 channel=self._channel,

@@ -12,6 +12,8 @@ import re
 from datetime import date
 from typing import Any
 
+from clanker.forges import is_raw_file_url, parse_repo
+
 CUTOFF = date(2026, 6, 1)
 
 # Order matters: the first matching prefix wins, so "Submission attempts" precedes "Submission".
@@ -142,8 +144,12 @@ def code_facts(sec: dict[str, str]) -> dict[str, Any]:
         "readme_url_is_raw_github": bool(
             re.match(r"https://raw\.githubusercontent\.com/", readme_url)
         ),
+        # Any forge's raw file link (GitHub, GitLab, Codeberg/Gitea, Bitbucket, sourcehut).
+        "readme_url_is_raw": is_raw_file_url(readme_url),
+        "repo_host": repo.kind if (repo := parse_repo(repo_url)) else "unknown",
         "repo_url_is_repo_root": bool(
-            re.fullmatch(r"https://github\.com/[^/\s]+/[^/\s]+?(\.git)?/?", repo_url)
+            repo
+            and repo_url.rstrip("/").removesuffix(".git").lower() == repo.web_url.lower()
         ),
         "demo_url_present": bool(demo_url and demo_url != "(none)"),
         "demo_url_is_repo_url": bool(
@@ -151,6 +157,8 @@ def code_facts(sec: dict[str, str]) -> dict[str, Any]:
         ),
         "demo_url_rejected_platforms": bad,
         "readme_present": "```markdown" in sec.get("readme", ""),
+        # Non-GitHub host unreachable: a missing README is unknown, not proven.
+        "readme_unverified": "not verified)" in sec.get("readme", ""),
         "readme_chars": len(sec.get("readme", "")),
         "commit_count_in_packet": len(dates),
         "commits_before_cutoff": sum(d < CUTOFF for d in dates),
@@ -215,4 +223,10 @@ def build_jev_state(
     facts = code_facts(sec)
     add_evidence(facts, evidence)
     state = {**packet_state(sec, facts), "code_excerpts": evidence.get("files") or []}
+    if not sec.get("repo_structure") and evidence.get("tree_paths"):
+        # Non-GitHub repos have no packet tree; give Jev the forge's file list instead.
+        listing = "\n".join(f"  - {path}" for path in evidence["tree_paths"])
+        state["repo_structure"] = cut(
+            f"Files (from the repo host):\n{listing}", LIMITS["repo_structure"]
+        )
     return state, facts, sec

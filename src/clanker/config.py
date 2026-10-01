@@ -7,6 +7,7 @@ Loaded from the environment and an optional ``.env`` file at the repo root.
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 from pathlib import Path
@@ -328,3 +329,10 @@ def configure_observability(settings: Settings) -> None:
         settings, os.environ.get(exclusion_variable, "")
     )
     logfire.instrument_httpx()
+    # Send warnings/errors from stdlib logging (e.g. "Video generation failed for cert …"
+    # with its traceback) to Logfire too; INFO stays in the console only.
+    root = logging.getLogger()
+    if not any(isinstance(h, logfire.LogfireLoggingHandler) for h in root.handlers):
+        handler = logfire.LogfireLoggingHandler()
+        handler.setLevel(logging.WARNING)
+        root.addHandler(handler)

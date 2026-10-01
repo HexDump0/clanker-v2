@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
+from clanker.forges import Repo, parse_repo
 from clanker.review.models import VideoEvidence
 from clanker.review.reject_message import BANNER_WHAT, ORDER, RejectContext, raw_readme_url
 from clanker.review.video.capture import VIEWPORT
@@ -60,9 +61,8 @@ class RejectVideoInputs:
     project_name: str = ""
 
 
-def _repo(inputs: RejectVideoInputs) -> tuple[str, str] | None:
-    m = re.match(r"https?://github\.com/([^/\s]+)/([^/\s#?]+)", inputs.repo_url or "")
-    return (m.group(1), m.group(2).removesuffix(".git")) if m else None
+def _repo(inputs: RejectVideoInputs) -> Repo | None:
+    return parse_repo(inputs.repo_url)
 
 
 def _readme_heading(markdown: str) -> str | None:
@@ -80,9 +80,7 @@ def plan_scenes(reasons: Sequence[str], inputs: RejectVideoInputs, seed: str) ->
     ctx = inputs.ctx
     repo = _repo(inputs)
     ref = inputs.commit or "HEAD"
-    blob = (
-        (lambda path: f"https://github.com/{repo[0]}/{repo[1]}/blob/{ref}/{path}") if repo else None
-    )
+    blob = (lambda path: repo.blob_url(ref, path)) if repo else None
     readme_url = blob("README.md") if blob else None
     wanted = [r for r in ORDER if r in set(reasons)]
     if "ai_code" in wanted and "ai_undeclared" in wanted:
@@ -167,7 +165,7 @@ def plan_scenes(reasons: Sequence[str], inputs: RejectVideoInputs, seed: str) ->
             )
         elif reason == "readme_not_raw":
             raw = (
-                raw_readme_url(ctx.readme_url, ctx.repo_url) or "the raw.githubusercontent.com link"
+                raw_readme_url(ctx.readme_url, ctx.repo_url) or "the raw file link"
             )
             specs.append(
                 SceneSpec(
@@ -242,9 +240,9 @@ def plan_scenes(reasons: Sequence[str], inputs: RejectVideoInputs, seed: str) ->
                 SceneSpec(
                     id="missing-build",
                     reason=reason,
-                    url=f"https://github.com/{repo[0]}/{repo[1]}/releases",
+                    url=repo.releases_url,
                     title="No build in the release",
-                    fix="Upload a build to a GitHub release",
+                    fix="Upload a build to a release",
                     caption="Reviewers need something to download and run, not just the source.",
                 )
             )
@@ -280,7 +278,7 @@ def plan_scenes(reasons: Sequence[str], inputs: RejectVideoInputs, seed: str) ->
                 SceneSpec(
                     id=reason.replace("_", "-"),
                     reason=reason,
-                    url=f"https://github.com/{repo[0]}/{repo[1]}",
+                    url=repo.web_url,
                     title="The source isn't here" if reason == "no_source" else "There's no README",
                     caption="Push the project's source code to the repo."
                     if reason == "no_source"
@@ -299,9 +297,151 @@ def plan_scenes(reasons: Sequence[str], inputs: RejectVideoInputs, seed: str) ->
                     fix="Rename the project",
                 )
             )
+        if not specs or specs[-1].reason != reason:
+            # No live page for this reason (unsupported repo host, no demo link, ...):
+            # every reject reason still gets a scene, as a text card.
+            specs.append(_fallback_card(reason, inputs, repo))
         if len(specs) >= MAX_SCENES:
             break
     return specs
+
+
+# Text-card wording for every reject reason: (title, caption, fix).
+FALLBACK_CARDS: dict[str, tuple[str, str, str]] = {
+    "no_source": (
+        "The source isn't here",
+        "Push the project's source code to the repo.",
+        "Push the source code",
+    ),
+    "no_readme": (
+        "There's no README",
+        "Add a README explaining what it is and how to use it.",
+        "Add a README",
+    ),
+    "untitled": (
+        "The project needs a name",
+        "Give it a real name in project settings.",
+        "Rename the project",
+    ),
+    "readme_not_raw": (
+        "The README link isn't raw",
+        "Stardance needs the raw file so it can render it. Swap the link in your project "
+        "settings.",
+        "Set the README link to the raw file",
+    ),
+    "bad_hosting": (
+        "This host sleeps",
+        "Free Render/Railway/Streamlit-style hosts sleep or load slowly. Use Vercel, Netlify "
+        "or GitHub Pages.",
+        "Move the demo to permanent hosting",
+    ),
+    "demo_is_repo": (
+        "The demo is the repo",
+        "Link the live site, a release build or the package page instead.",
+        "Change the demo link",
+    ),
+    "demo_is_video": (
+        "The demo is a video",
+        "The demo needs to let people actually try the project.",
+        "Link a demo people can use",
+    ),
+    "missing_build": (
+        "No build in the release",
+        "Reviewers need something to download and run, not just the source.",
+        "Upload a build to a release",
+    ),
+    "itch_no_build": (
+        "No build on the itch page",
+        "Upload a downloadable or browser-playable build.",
+        "Add a build to the itch page",
+    ),
+    "bot_link_invalid": (
+        "People can't try the bot here",
+        "Link a channel or server invite where the bot runs.",
+        "Link a channel for the bot",
+    ),
+    "demo_broken": (
+        "The demo doesn't load",
+        "The demo page shows an error right now. Check your deployment and reship.",
+        "Fix the demo deployment",
+    ),
+    "needs_api_key": (
+        "It needs your own API key",
+        "Reviewers can't bring their own key. Include a working key or proxy (Hack Club AI "
+        "is a free option).",
+        "Make the demo work without a user API key",
+    ),
+    "banner_default": (
+        "There's no banner yet",
+        "Add a screenshot of your project in action in project settings.",
+        "Add a project banner",
+    ),
+    "banner_bad": (
+        "The banner should show the project",
+        "Use a screenshot of your project in action. Change it in project settings.",
+        "Swap the banner for a real screenshot",
+    ),
+    "ai_code": (
+        "Most of this is AI-generated",
+        "The project is well over our 30% AI limit. Small edits won't be enough: redo the "
+        "design and code yourself and build features you came up with.",
+        "Rebuild the design and code yourself, with your own features",
+    ),
+    "ai_undeclared": (
+        "AI use isn't declared",
+        "It looks like AI was used, but the AI declaration doesn't say so. Please declare it "
+        "honestly.",
+        "Declare your AI use honestly",
+    ),
+    "ai_readme": (
+        "The README reads AI-written",
+        "Write it yourself from scratch: what you built, how and why you built it, and how to "
+        "use it. Editing the AI text won't be enough.",
+        "Write the README yourself, from scratch",
+    ),
+    "readme_thin": (
+        "The README needs more detail",
+        "Add what the project does, its features, how to use it and how you made it.",
+        "Expand the README",
+    ),
+    "feedback_ignored": (
+        "The last feedback isn't addressed yet",
+        "Please make the changes from the previous review before reshipping.",
+        "Address the previous review's feedback",
+    ),
+    "not_eligible": (
+        "This project isn't eligible",
+        "It looks like a school assignment or otherwise outside the program's rules.",
+        "Check the eligibility rules",
+    ),
+}
+
+
+def _fallback_card(reason: str, inputs: RejectVideoInputs, repo: Repo | None) -> SceneSpec:
+    ctx = inputs.ctx
+    title, caption, fix = FALLBACK_CARDS.get(
+        reason, ("This needs a fix", "See the review message for details.", "See the review")
+    )
+    if reason.startswith(("demo_", "bad_hosting", "itch_", "bot_", "needs_api")):
+        lines = [f"demo:  {ctx.demo_url or '(not set)'}"]
+    elif reason.startswith(("readme_", "ai_readme", "no_readme")):
+        lines = [f"README:  {ctx.readme_url or '(not set)'}"]
+    elif reason.startswith("banner_"):
+        lines = [f"banner:  {inputs.banner_url or '(default)'}"]
+    elif reason == "missing_build" and repo:
+        lines = [f"releases:  {repo.releases_url}"]
+    elif reason == "untitled":
+        lines = [f"name:  {inputs.project_name or 'untitled'}"]
+    else:
+        lines = [f"repo:  {inputs.repo_url or ctx.repo_url or '(not set)'}"]
+    return SceneSpec(
+        id=reason.replace("_", "-"),
+        reason=reason,
+        title=title,
+        caption=caption,
+        card_lines=lines,
+        fix=fix,
+    )
 
 
 def evidence_for(specs: Sequence[SceneSpec]) -> list[VideoEvidence]:

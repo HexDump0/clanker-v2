@@ -20,6 +20,8 @@ import random
 import re
 from dataclasses import dataclass, field
 
+from clanker import forges
+
 # Reviewers rarely list more than three problems; the most blocking ones come first (ORDER).
 MAX_ISSUES = 3
 GREAT_README = "https://stardance.hackclub.com/resources/great_readme"
@@ -119,12 +121,9 @@ BUILD_BY_TYPE = {
 
 
 def raw_readme_url(readme_url: str | None, repo_url: str | None) -> str | None:
-    """Best-effort raw.githubusercontent.com URL for the README, or None if unsure."""
-    m = re.match(r"https?://github\.com/([^/]+)/([^/]+)/blob/([^/]+)/(.+?)/?$", readme_url or "")
-    if m:
-        owner, repo, ref, path = m.groups()
-        return f"https://raw.githubusercontent.com/{owner}/{repo}/refs/heads/{ref}/{path}"
-    return None
+    """Best-effort raw README link on the repo's forge (GitHub, GitLab, Codeberg, ...), or
+    None if unsure."""
+    return forges.raw_readme_url(readme_url, repo_url)
 
 
 def _phrases(reason: str, ctx: RejectContext) -> list[str]:
@@ -172,6 +171,13 @@ def _phrases(reason: str, ctx: RejectContext) -> list[str]:
             return [
                 f"your README link isn't raw, please set it to {raw} before reshipping",
                 f"the README link needs to be the raw file. please set it to {raw}",
+            ]
+        repo = forges.parse_repo(ctx.repo_url)
+        if repo is not None and repo.kind != "github":
+            return [
+                'your README link isn\'t raw. open your README in the repo, click "Raw" and use '
+                "that link",
+                "the README link needs to be the raw file, not the repo page",
             ]
         return [
             'your README link isn\'t raw. open your README on GitHub, click "Raw" and use that '

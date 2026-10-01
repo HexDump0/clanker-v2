@@ -20,6 +20,27 @@ browser/video failures must not invalidate a completed review or PDF.
 An agentic component is one where a model chooses actions or tools, observes their
 results, and adapts what it does next.
 
+### Review mode (2026-10-01)
+
+`REVIEW_MODE` picks the reviewer the runner uses (`clanker.review.runner.ReviewRunner`):
+
+- `first_layer` (default): `clanker.review.first_layer.FirstLayerReviewer`. Code facts plus one
+  Jev call, then REJECT only what is confidently established, or PASS to a human
+  (`FLAG_FOR_HUMAN` / "NEEDS HUMAN" in Slack). Nothing is LLM-written: the reject message
+  comes from `clanker.review.reject_message` and is posted in the Slack thread for a human to
+  send from the dashboard; on REJECT the code-directed reject video is rendered when
+  `VIDEO_ENABLED`. `ReviewOutcome.reject_message` / `.first_layer` carry the result.
+- `agent`: the DeepSeek review agent described next (plus the vision video director).
+
+`service.build_app` only constructs the reviewer for the selected mode.
+
+Repo hosts (`clanker.forges`): the Dashboard only caches GitHub, so for GitLab, Codeberg/Gitea/
+Forgejo, Bitbucket and sourcehut the packet fetches the README from the forge itself. If the forge
+can't be reached, the README counts as *unverified* and never causes a reject. The first layer reads code
+excerpts and release assets for GitHub, GitLab and Gitea. Raw-link checks, reject-message links and
+video scene URLs are built per forge. Every reject reason has a video scene: a live page when one
+exists, otherwise a text card.
+
 ### Review agent — agentic and authoritative
 
 Given a submission packet, the review agent:

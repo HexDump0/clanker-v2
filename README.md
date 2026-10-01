@@ -13,15 +13,21 @@ src/clanker/
 ├── shipwrights/     typed async client for ds.shipwrights.dev/api/v1
 │                    (mutating endpoints gated behind allow_mutations=True)
 ├── watcher.py       polls the PENDING queue; seen-state persists to disk
+├── forges.py        repo-host URLs (GitHub, GitLab, Codeberg/Gitea, Bitbucket,
+│                    sourcehut): raw/blob links, README fetch
 ├── review/
 │   ├── packet.py    pre-fetches detail + cached GitHub + README + prior reviews
+│   ├── first_layer/ default reviewer: code facts + one Jev call → REJECT
+│   │                (template reject message) or pass to a human
+│   ├── reject_message.py  no-LLM, Shipwright-style reject text
 │   ├── agent.py     pydantic-ai agents (review: structured output; chat: text)
 │   ├── models.py    ReviewOutput — the 13-check rubric as a validated schema
 │   ├── tools.py     11 investigation tools (GitHub, URL checks, page fetch)
 │   ├── pdf.py       async Typst compile of the report
 │   ├── video/       screenshot capture → vision direction → target resolution
 │   │                → minimal MP4 composition, with JSON audit manifest
-│   └── runner.py    packet → agent → ReviewOutput → PDF
+│   └── runner.py    packet → first layer (or agent) → ReviewOutput → PDF
+│                    (+ code-directed reject video)
 ├── slack/           announcements, verdict updates, PDF upload, @mention chat
 │                    bot (Socket Mode, streaming)
 ├── service.py       supervisor: watcher + Slack, per-service restart w/ backoff,
@@ -62,7 +68,7 @@ Chromium isn't available.
 ```sh
 uv run clanker queue                 # pending queue + stats
 uv run clanker show <cert-id>        # full cert detail as JSON
-uv run clanker review <cert-id>      # one full review: verdict + PDF, no Slack
+uv run clanker review <cert-id>      # one full review: verdict + reject message + PDF (+ video), no Slack
 uv run clanker watch                 # watcher only (logs new certs)
 uv run clanker run                   # everything: watcher + reviews + Slack
 ```

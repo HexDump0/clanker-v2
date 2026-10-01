@@ -262,7 +262,7 @@ def to_review_output(result: FirstLayerResult) -> ReviewOutput:
         "readme_language", "demo_validity", "demo_credentials", "description_accuracy",
         "demo_link_type",
     )}  # fmt: skip
-    if facts.get("readme_url_is_raw_github"):
+    if facts.get("readme_url_is_raw"):
         rows["readme_is_raw_github"] = _check(CheckStatus.PASS, "README link is the raw file.")
     if facts.get("demo_url_present") and not facts.get("demo_url_rejected_platforms"):
         rows["demo_link_type"] = _check(CheckStatus.PASS, "Demo is not on a disallowed host.")

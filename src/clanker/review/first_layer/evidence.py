@@ -1,6 +1,7 @@
 """Extra first-layer evidence, gathered by code plus one narrow vision call. No agent.
 
-- Code excerpts: real file sizes from the GitHub tree at the submission commit; the largest
+- Code excerpts: real file sizes from the repo tree (GitHub, GitLab, Gitea/Forgejo) at the
+  submission commit; the largest
   stylesheet, UI file and logic file; head + middle slice of each (AI-look lives throughout
   a file, not just the top).
 - Release assets that existed before the review (for demo-format checks).
@@ -11,15 +12,21 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Awaitable, Callable
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 from pydantic_ai import Agent, BinaryContent
 
 from clanker.config import Settings
+from clanker.forges import Repo, parse_repo
 from clanker.llm import build_model, build_routing_model_settings
 
 HEAD, MIDDLE = 2_500, 1_500
+MAX_TREE_PAGES = 10  # GitLab: 100 entries a page; Gitea: 1000
+MAX_SIZED_PATHS = 300  # GitLab GraphQL size lookup
+TREE_PATHS = 400  # file list handed to Jev when the packet has no GitHub tree
 MAX_IMAGE_BYTES = 8_000_000
 
 SKIP = re.compile(
@@ -110,55 +117,23 @@ async def gather_evidence(
 ) -> dict[str, Any]:
     """Evidence for one packet. Failures are recorded as data, never raised.
 
-    ``cutoff`` is an ISO timestamp: release assets uploaded after it are ignored.
+    ``cutoff`` is an ISO timestamp: release assets uploaded after it are ignored. GitHub,
+    GitLab and Gitea/Forgejo (Codeberg) repos get code excerpts and release assets; other
+    forges get neither (the Jev code questions then answer "not AI" by design).
     """
     out: dict[str, Any] = {"files": [], "release_assets": None, "banner": None}
-    repo = re.search(r"^- Repo URL: https://github\.com/([^/\s]+)/([^/\s#?]+)", prompt, re.M)
+    m = re.search(r"^- Repo URL: (\S+)", prompt, re.M)
+    repo = parse_repo(m.group(1) if m else None)
     sha = submission_commit(prompt)
-    if repo:
-        owner, name = repo.group(1), repo.group(2).removesuffix(".git")
-        base = f"/repos/{owner}/{name}"
-        try:
-            commit = await gh.get(f"{base}/commits/{sha or 'HEAD'}")
-            if commit.status_code == 200:
-                full = commit.json()["sha"]
-                tree = await gh.get(
-                    f"{base}/git/trees/{commit.json()['commit']['tree']['sha']}",
-                    params={"recursive": "1"},
-                )
-                if tree.status_code == 200:
-                    blobs = [
-                        (e["path"], e.get("size", 0))
-                        for e in tree.json().get("tree", [])
-                        if e.get("type") == "blob"
-                    ]
-                    out["tree_code_files"] = sum(
-                        p.lower().endswith(STYLE + UI + LOGIC) for p, _ in blobs
-                    )
-                    for path in pick_files(blobs):
-                        r = await gh.get(
-                            f"{base}/contents/{path}",
-                            params={"ref": full},
-                            headers={"Accept": "application/vnd.github.raw+json"},
-                        )
-                        if r.status_code == 200:
-                            out["files"].append(
-                                {
-                                    "path": path,
-                                    "total_chars": len(r.text),
-                                    "excerpt": excerpt(r.text),
-                                }
-                            )
-            releases = await gh.get(f"{base}/releases", params={"per_page": 20})
-            if releases.status_code == 200:
-                out["release_assets"] = [
-                    a["name"]
-                    for rel in releases.json()
-                    for a in rel.get("assets", [])
-                    if (a.get("created_at") or "") <= cutoff
-                ]
-        except Exception as exc:
-            out["github_error"] = str(exc)[:200]
+    try:
+        if repo is not None and repo.kind == "github":
+            await _github_evidence(repo, sha, cutoff, gh, out)
+        elif repo is not None and repo.kind == "gitlab":
+            await _gitlab_evidence(repo, sha or "HEAD", cutoff, web, out)
+        elif repo is not None and repo.kind == "gitea":
+            await _gitea_evidence(repo, sha or "HEAD", cutoff, web, out)
+    except Exception as exc:
+        out["github_error"] = str(exc)[:200]
 
     banner = re.search(r"^- banner_url: (\S+)", prompt, re.M)
     if banner and vision is not None:
@@ -167,3 +142,139 @@ async def gather_evidence(
         except Exception as exc:
             out["banner"] = f"error:{type(exc).__name__}"
     return out
+
+
+async def _add_files(
+    blobs: list[tuple[str, int]], out: dict[str, Any], read: Callable[[str], Awaitable[str | None]]
+) -> None:
+    """Shared by every forge: count code files, pick and excerpt the three to show Jev."""
+    out["tree_code_files"] = sum(p.lower().endswith(STYLE + UI + LOGIC) for p, _ in blobs)
+    out["tree_paths"] = [p for p, _ in blobs[:TREE_PATHS]]
+    for path in pick_files(blobs):
+        text = await read(path)
+        if text is not None:
+            out["files"].append({"path": path, "total_chars": len(text), "excerpt": excerpt(text)})
+
+
+async def _github_evidence(
+    repo: Repo, sha: str | None, cutoff: str, gh: httpx.AsyncClient, out: dict[str, Any]
+) -> None:
+    base = f"/repos/{repo.path}"
+    commit = await gh.get(f"{base}/commits/{sha or 'HEAD'}")
+    if commit.status_code == 200:
+        full = commit.json()["sha"]
+        tree = await gh.get(
+            f"{base}/git/trees/{commit.json()['commit']['tree']['sha']}",
+            params={"recursive": "1"},
+        )
+        if tree.status_code == 200:
+
+            async def read(path: str) -> str | None:
+                r = await gh.get(
+                    f"{base}/contents/{path}",
+                    params={"ref": full},
+                    headers={"Accept": "application/vnd.github.raw+json"},
+                )
+                return r.text if r.status_code == 200 else None
+
+            blobs = [
+                (e["path"], e.get("size", 0))
+                for e in tree.json().get("tree", [])
+                if e.get("type") == "blob"
+            ]
+            await _add_files(blobs, out, read)
+    releases = await gh.get(f"{base}/releases", params={"per_page": 20})
+    if releases.status_code == 200:
+        out["release_assets"] = [
+            a["name"]
+            for rel in releases.json()
+            for a in rel.get("assets", [])
+            if (a.get("created_at") or "") <= cutoff
+        ]
+
+
+async def _gitlab_evidence(
+    repo: Repo, ref: str, cutoff: str, web: httpx.AsyncClient, out: dict[str, Any]
+) -> None:
+    api = f"https://{repo.host}/api/v4/projects/{quote(repo.path, safe='')}"
+    paths: list[str] = []
+    for page in range(1, MAX_TREE_PAGES + 1):
+        r = await web.get(
+            f"{api}/repository/tree",
+            params={"recursive": "true", "per_page": 100, "ref": ref, "page": page},
+        )
+        if r.status_code != 200:
+            break
+        items = r.json()
+        paths += [e["path"] for e in items if e.get("type") == "blob"]
+        if len(items) < 100:
+            break
+    if paths:
+        # The REST tree has no sizes; GraphQL returns them for many paths in one request.
+        candidates = [p for p in paths if p.lower().endswith(STYLE + UI + LOGIC)]
+        candidates = [p for p in candidates if not SKIP.search(p)][:MAX_SIZED_PATHS]
+        sizes: dict[str, int] = {}
+        if candidates:
+            g = await web.post(
+                f"https://{repo.host}/api/graphql",
+                json={
+                    "query": "query($p: ID!, $paths: [String!]!, $ref: String) { project("
+                    "fullPath: $p) { repository { blobs(paths: $paths, ref: $ref) { nodes "
+                    "{ path size } } } } }",
+                    "variables": {"p": repo.path, "paths": candidates, "ref": ref},
+                },
+            )
+            if g.status_code == 200:
+                project = (g.json().get("data") or {}).get("project") or {}
+                nodes = ((project.get("repository") or {}).get("blobs") or {}).get("nodes") or []
+                sizes = {n["path"]: int(n.get("size") or 0) for n in nodes}
+
+        async def read(path: str) -> str | None:
+            r = await web.get(
+                f"{api}/repository/files/{quote(path, safe='')}/raw", params={"ref": ref}
+            )
+            return r.text if r.status_code == 200 else None
+
+        await _add_files([(p, sizes.get(p, 0)) for p in paths], out, read)
+    releases = await web.get(f"{api}/releases", params={"per_page": 20})
+    if releases.status_code == 200:
+        out["release_assets"] = [
+            link["name"]
+            for rel in releases.json()
+            if (rel.get("released_at") or rel.get("created_at") or "") <= cutoff
+            for link in (rel.get("assets") or {}).get("links", [])
+        ]
+
+
+async def _gitea_evidence(
+    repo: Repo, ref: str, cutoff: str, web: httpx.AsyncClient, out: dict[str, Any]
+) -> None:
+    api = f"https://{repo.host}/api/v1/repos/{repo.path}"
+    blobs: list[tuple[str, int]] = []
+    for page in range(1, MAX_TREE_PAGES + 1):
+        r = await web.get(
+            f"{api}/git/trees/{ref}", params={"recursive": "true", "per_page": 1000, "page": page}
+        )
+        if r.status_code != 200:
+            break
+        data = r.json()
+        blobs += [
+            (e["path"], e.get("size", 0)) for e in data.get("tree") or [] if e.get("type") == "blob"
+        ]
+        if not data.get("truncated"):
+            break
+    if blobs:
+
+        async def read(path: str) -> str | None:
+            r = await web.get(f"{api}/raw/{quote(path)}", params={"ref": ref})
+            return r.text if r.status_code == 200 else None
+
+        await _add_files(blobs, out, read)
+    releases = await web.get(f"{api}/releases", params={"limit": 20})
+    if releases.status_code == 200:
+        out["release_assets"] = [
+            a["name"]
+            for rel in releases.json()
+            for a in rel.get("assets") or []
+            if (a.get("created_at") or "") <= cutoff
+        ]

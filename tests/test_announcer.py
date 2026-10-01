@@ -96,3 +96,20 @@ async def test_post_outcome_uploads_pdf_and_video(tmp_path):
     uploads = slack.files_upload_v2.call_args_list
     assert uploads[0].kwargs["filename"] == "review_report.pdf"
     assert uploads[1].kwargs["filename"] == "review_walkthrough.mp4"
+
+
+async def test_post_outcome_posts_reject_message_in_thread(tmp_path):
+    pdf = tmp_path / "r.pdf"
+    pdf.write_bytes(b"%PDF-fake")
+    announcer, slack = make_announcer()
+    cert = CertSummary.model_validate(make_cert("c1"))
+    outcome = outcome_for(cert, pdf=pdf, verdict=ReviewVerdict.REJECT)
+    outcome.reject_message = "Hey tester, please rewrite the README yourself and reship!"
+
+    await announcer.post_outcome(cert, outcome, "111.222")
+
+    texts = [c.kwargs["text"] for c in slack.chat_postMessage.call_args_list]
+    posted = next(t for t in texts if "Reject message" in t)
+    assert "please rewrite the README yourself" in posted
+    assert slack.chat_postMessage.call_args_list[-1].kwargs["thread_ts"] == "111.222"
+    slack.files_upload_v2.assert_awaited_once()

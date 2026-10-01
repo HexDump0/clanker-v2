@@ -1,4 +1,7 @@
-"""Orchestrates one review: packet -> agent -> structured result -> PDF.
+"""Orchestrates one review: packet -> reviewer -> structured result -> PDF (+ video).
+
+The reviewer is either the first layer (code checks + one Jev call; REJECT or PASS to a
+human) or the older DeepSeek review agent, chosen by ``Settings.review_mode``.
 
 Pure pipeline — no Slack in here (the slack layer consumes ReviewOutcome), no
 contextvars (the cert id is passed explicitly end to end), no message-log
@@ -11,20 +14,27 @@ import asyncio
 import json
 import logging
 import re
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
 
 from pydantic_ai import Agent
 
 from clanker.config import Settings
-from clanker.review.models import ReviewOutput
+from clanker.review.first_layer import FirstLayerResult, FirstLayerReviewer, to_review_output
+from clanker.review.models import ReviewOutput, ReviewVerdict
 from clanker.review.packet import ReviewPacket, build_packet
 from clanker.review.pdf import PdfError, generate_review_pdf
 from clanker.review.tools import ReviewTools
 from clanker.review.video.compositor import DEFAULT_MUSIC
 from clanker.review.video.director import Director
 from clanker.review.video.models import VideoProject
-from clanker.review.video.pipeline import generate_review_video
+from clanker.review.video.pipeline import (
+    VideoGenerationResult,
+    generate_reject_video,
+    generate_review_video,
+)
+from clanker.review.video.template_director import plan_scenes
 from clanker.shipwrights import ShipwrightsClient
 
 logger = logging.getLogger(__name__)
@@ -65,19 +75,26 @@ class ReviewOutcome:
     output_tokens: int
     video_path: Path | None = None
     video_error: str | None = None
+    # First-layer only: the copy-ready message for the shipper on REJECT.
+    reject_message: str | None = None
+    first_layer: FirstLayerResult | None = None
 
 
 class ReviewRunner:
     def __init__(
         self,
         *,
-        agent: Agent[None, ReviewOutput],
         client: ShipwrightsClient,
         settings: Settings,
+        agent: Agent[None, ReviewOutput] | None = None,
+        first_layer: FirstLayerReviewer | None = None,
         tools: ReviewTools | None = None,
         video_director: Director | None = None,
     ) -> None:
+        if agent is None and first_layer is None:
+            raise ValueError("ReviewRunner needs a review agent or a first-layer reviewer")
         self._agent = agent
+        self._first_layer = first_layer
         self._client = client
         self._settings = settings
         self._tools = tools
@@ -93,7 +110,85 @@ class ReviewRunner:
         """Run the full pipeline for one cert. Raises on unrecoverable errors."""
         packet = await build_packet(self._client, cert_id, tools=self._tools)
         logger.info("Reviewing cert %s (%r)", cert_id, packet.cert.project_name)
+        if self._first_layer is not None:
+            return await self._review_first_layer(cert_id, packet, self._first_layer)
+        return await self._review_with_agent(cert_id, packet)
 
+    async def _render_pdf(
+        self, cert_id: str, packet: ReviewPacket, review: ReviewOutput
+    ) -> Path | None:
+        try:
+            return await generate_review_pdf(
+                review,
+                output_path=self._settings.pdf_dir / f"{cert_id}.pdf",
+                project_name=packet.cert.project_name,
+                project_desc=packet.cert.description or "",
+                repo_url=packet.cert.repo_url,
+                demo_url=packet.cert.demo_url,
+            )
+        except PdfError:
+            # The verdict is still valid without the report.
+            logger.exception("PDF generation failed for cert %s", cert_id)
+            return None
+
+    async def _video_stage(
+        self, cert_id: str, make: Callable[[], Awaitable[VideoGenerationResult]]
+    ) -> tuple[Path | None, str | None]:
+        """Run one optional video job under the timeout; failures never touch the verdict."""
+        try:
+            generated = await asyncio.wait_for(make(), timeout=self._settings.video_timeout)
+            return generated.video.path, None
+        except TimeoutError:
+            logger.exception("Video generation timed out for cert %s", cert_id)
+            return None, f"video generation exceeded the {self._settings.video_timeout:g}s timeout"
+        except Exception as exc:
+            # A failed optional artifact never invalidates the review or PDF.
+            logger.exception("Video generation failed for cert %s", cert_id)
+            return None, str(exc)
+
+    async def _review_first_layer(
+        self, cert_id: str, packet: ReviewPacket, reviewer: FirstLayerReviewer
+    ) -> ReviewOutcome:
+        result = await reviewer.review(packet)
+        review = to_review_output(result)
+        pdf_path = await self._render_pdf(cert_id, packet, review)
+
+        video_path: Path | None = None
+        video_error: str | None = None
+        if (
+            self._settings.video_enabled
+            and review.verdict == ReviewVerdict.REJECT
+            # Reasons with nothing to show (e.g. an unsupported repo host) mean no video,
+            # not a failed one.
+            and plan_scenes(result.reasons, result.video_inputs, cert_id)
+        ):
+            video_path, video_error = await self._video_stage(
+                cert_id,
+                lambda: generate_reject_video(
+                    reasons=result.reasons,
+                    inputs=result.video_inputs,
+                    seed=cert_id,
+                    work_dir=self._settings.video_work_dir / cert_id,
+                    output_path=self._settings.video_dir / f"{cert_id}.mp4",
+                    music_path=self._resolve_video_music(),
+                ),
+            )
+
+        return ReviewOutcome(
+            cert_id=cert_id,
+            packet=packet,
+            review=review,
+            pdf_path=pdf_path,
+            input_tokens=result.jev_input_tokens,
+            output_tokens=0,
+            video_path=video_path,
+            video_error=video_error,
+            reject_message=result.message,
+            first_layer=result,
+        )
+
+    async def _review_with_agent(self, cert_id: str, packet: ReviewPacket) -> ReviewOutcome:
+        assert self._agent is not None
         result = await self._agent.run(packet.to_prompt())
         review = result.output
         _guard_private_context(review, getattr(packet, "private_context", []))
@@ -108,19 +203,7 @@ class ReviewRunner:
             usage.requests,
         )
 
-        pdf_path: Path | None = None
-        try:
-            pdf_path = await generate_review_pdf(
-                review,
-                output_path=self._settings.pdf_dir / f"{cert_id}.pdf",
-                project_name=packet.cert.project_name,
-                project_desc=packet.cert.description or "",
-                repo_url=packet.cert.repo_url,
-                demo_url=packet.cert.demo_url,
-            )
-        except PdfError:
-            # The verdict is still valid without the report.
-            logger.exception("PDF generation failed for cert %s", cert_id)
+        pdf_path = await self._render_pdf(cert_id, packet, review)
 
         video_path: Path | None = None
         video_error: str | None = None
@@ -129,37 +212,25 @@ class ReviewRunner:
             and self._video_director is not None
             and review.video_evidence
         ):
-            try:
-                generated = await asyncio.wait_for(
-                    generate_review_video(
-                        project=VideoProject(
-                            project_name=packet.cert.project_name,
-                            project_author=(
-                                packet.cert.submitter_username
-                                or packet.cert.submitter_name
-                                or ""
-                            ),
-                            verdict=review.verdict.value,
-                            required_fixes=review.required_fixes or [],
+            director = self._video_director
+            video_path, video_error = await self._video_stage(
+                cert_id,
+                lambda: generate_review_video(
+                    project=VideoProject(
+                        project_name=packet.cert.project_name,
+                        project_author=(
+                            packet.cert.submitter_username or packet.cert.submitter_name or ""
                         ),
-                        evidence=review.video_evidence,
-                        director=self._video_director,
-                        work_dir=self._settings.video_work_dir / cert_id,
-                        output_path=self._settings.video_dir / f"{cert_id}.mp4",
-                        music_path=self._resolve_video_music(),
+                        verdict=review.verdict.value,
+                        required_fixes=review.required_fixes or [],
                     ),
-                    timeout=self._settings.video_timeout,
-                )
-                video_path = generated.video.path
-            except TimeoutError:
-                video_error = (
-                    f"video generation exceeded the {self._settings.video_timeout:g}s timeout"
-                )
-                logger.exception("Video generation timed out for cert %s", cert_id)
-            except Exception as exc:
-                # A failed optional artifact never invalidates the review or PDF.
-                video_error = str(exc)
-                logger.exception("Video generation failed for cert %s", cert_id)
+                    evidence=review.video_evidence,
+                    director=director,
+                    work_dir=self._settings.video_work_dir / cert_id,
+                    output_path=self._settings.video_dir / f"{cert_id}.mp4",
+                    music_path=self._resolve_video_music(),
+                ),
+            )
 
         return ReviewOutcome(
             cert_id=cert_id,
