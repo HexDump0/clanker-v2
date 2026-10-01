@@ -27,20 +27,12 @@
   "content_scripts": [
     {
       "matches": [
-        "https://ds.shipwrights.dev/*/certifications/*"
+        "https://ds.shipwrights.dev/*"
       ],
       "js": [
         "api.js",
         "ui.js",
-        "content.js"
-      ],
-      "run_at": "document_idle"
-    },
-    {
-      "matches": [
-        "https://ds.shipwrights.dev/*"
-      ],
-      "js": [
+        "content.js",
         "nav.js"
       ],
       "run_at": "document_idle"

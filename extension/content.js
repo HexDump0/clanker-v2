@@ -164,5 +164,5 @@
     if (e.key === "Escape" && drawerOpen) closeDrawer?.();
   });
   sync();
-  setInterval(sync, 1000);
+  setInterval(sync, 400);
 })();
