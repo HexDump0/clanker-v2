@@ -1,0 +1,36 @@
+# Hosted Clanker: the bot + extension API behind Caddy (automatic HTTPS).
+#   cp ../.env.example ../.env   # fill in the usual secrets (Dashboard session, Slack, OpenRouter, ...)
+#   echo "CLANKER_DOMAIN=clanker.example.com" > .env.deploy
+#   docker compose --env-file .env.deploy up -d --build
+services:
+  clanker:
+    build: ..
+    restart: unless-stopped
+    env_file: ../.env
+    environment:
+      EXTENSION_API_ENABLED: "true"
+      EXTENSION_API_HOST: 0.0.0.0
+      EXTENSION_API_TRUST_PROXY: "true"   # real client IPs from Caddy (used for failed-login throttling)
+    volumes:
+      - clanker-data:/app/data            # results, videos, PDFs, review budget, watcher state
+    expose:
+      - "8765"                            # only Caddy can reach this; it is NOT published to the internet
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on: [clanker]
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      CLANKER_DOMAIN: ${CLANKER_DOMAIN:?set CLANKER_DOMAIN in .env.deploy}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  clanker-data:
+  caddy-data:
+  caddy-config:

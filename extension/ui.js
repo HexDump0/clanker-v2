@@ -147,7 +147,7 @@
 
     if (manual) {
       out.banner = h("div", { class: "banner flag" },
-        h("div", { class: "top" }, h("span", { class: "lbl", style: "color:inherit;opacity:.75" }, "Clanker · marked wrong"),
+        h("div", { class: "top" }, h("span", { class: "lbl", style: "color:inherit;opacity:.75" }, fb?.by_name ? `Clanker · marked wrong by ${fb.by_name}` : "Clanker · marked wrong"),
           h("span", {}, `reviewed ${timeAgo(rec.created_at)}`)),
         h("p", {}, "Clanker got this one wrong, please review manually."),
         fb?.note ? h("p", { style: "font-size:13px;opacity:.85" }, `“${fb.note}”`) : null);

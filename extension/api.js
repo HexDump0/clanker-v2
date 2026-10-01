@@ -58,6 +58,7 @@
   globalThis.ClankerApi = {
     getBase,
     setBase,
+    me: () => request("/api/me"),
     listResults: (verdict) =>
       request("/api/results" + (verdict ? `?verdict=${encodeURIComponent(verdict)}` : "")),
     getResult: (id) => request(`/api/results/${encodeURIComponent(id)}`),

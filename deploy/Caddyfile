@@ -1,0 +1,5 @@
+{$CLANKER_DOMAIN} {
+	encode zstd gzip
+	# Videos/PDFs are streamed; Caddy passes Range requests through.
+	reverse_proxy clanker:8765
+}

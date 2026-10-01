@@ -61,3 +61,7 @@ claim the ship if it isn't claimed, attach Clanker's video (always, when there i
 - After a successful reject, if Clanker's verdict was also **Reject**, the ship is labelled **Clanker was right** automatically (never over
   an existing label; not done when Clanker said approve/needs human).
 - Ships marked "Clanker got it wrong" don't prefill Clanker's message. **Clanker was wrong / right** sit right below the Reject button.
+
+## Hosting for other reviewers
+See `../deploy/README.md` (Docker + Caddy with HTTPS, per-user daily review budget, allow-list, who-did-what attribution) and build the
+extension for your URL with `API_URL=https://… ./build.sh` (`--sign` adds Firefox signing via addons.mozilla.org).

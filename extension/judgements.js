@@ -310,10 +310,12 @@
     const input = h("input", { type: "text", placeholder: "Ship link or ID", spellcheck: "false" });
     const status = h("div", { class: "hint" });
     const go = h("button", { class: "btn t accent" }, "Request review");
+    const left = h("div", { class: "help" });
+    ClankerApi.me().then((m) => { if (m && m.reviews_left != null) left.textContent = `${m.reviews_left} review${m.reviews_left === 1 ? "" : "s"} left for you today.`; }).catch(() => {});
     const d = dialog([
       h("h3", {}, "Review a ship"),
       h("div", { class: "help" }, "Paste the dashboard link or the ID. Clanker reviews it now and posts to Slack. Takes about a minute."),
-      input, status,
+      input, status, left,
       h("div", { class: "row-actions" }, h("button", { class: "btn ghost", onclick: () => d.close() }, "Cancel"), go)]);
     const submit = async () => {
       const id = (input.value.match(ID_RE) || [input.value.trim()])[0];
