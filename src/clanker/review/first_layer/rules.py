@@ -48,6 +48,10 @@ REASONS = {
     "bad_hosting": "The demo is on a disallowed host (Render/Railway/Streamlit/tunnels/Drive/"
     "Colab/Hugging Face/localhost). Host it on permanent hosting.",
     "no_readme": "The repository has no README.",
+    "readme_not_english": "The README needs to be in English (or link an English version at "
+    "the top).",
+    "pre_event_undeclared": "The project has work from before June 1, 2026 but isn't marked "
+    "as an updated project. Mark it as an update when you reship.",
     # v2 code/vision-decided:
     "banner_default": "Set a project banner: a screenshot of your project in action.",
     "banner_bad": "Your banner must be a screenshot of your project in action (not code, a "
@@ -222,6 +226,9 @@ BUILD_EXT = {
     "android_app": (".apk", ".aab"),
     "cli_tool": (),
 }
+# Own commits before June 1, 2026 that make a project "started before Stardance". A
+# couple of stray old-dated commits (imported files, a wrong clock) don't count.
+PRE_EVENT_MIN_COMMITS = 3
 # Forges whose release assets the evidence step reads (missing_build needs them).
 RELEASE_FORGES = ("github", "gitlab", "gitea")
 BAD_BANNERS = {"code_screenshot", "logo_or_text", "ai_generated_art", "unrelated"}
@@ -292,6 +299,12 @@ def code_rules(answers: dict[str, Any], facts: dict[str, Any]) -> list[str]:
         and facts.get("language_bytes", 0) == 0
     ):
         reasons.append("no_source")
+    history = facts.get("commit_history") or {}
+    if (
+        not facts.get("declared_as_updated_project")
+        and history.get("pre_cutoff_own_commits", 0) >= PRE_EVENT_MIN_COMMITS
+    ):
+        reasons.append("pre_event_undeclared")
     if re.match(r"\s*(untitled|new project|my project)\b", facts.get("project_name") or "", re.I):
         reasons.append("untitled")
     return reasons
@@ -306,6 +319,8 @@ def reject_decision(
         reasons.append("no_readme")
     if facts["readme_present"] and not facts["readme_url_is_raw"]:
         reasons.append("readme_not_raw")
+    if facts["readme_present"] and facts.get("readme_not_english"):
+        reasons.append("readme_not_english")
     if facts["demo_url_rejected_platforms"]:
         reasons.append("bad_hosting")
     if facts.get("v2"):
@@ -324,8 +339,10 @@ def reject_decision(
             continue
         if key == "feedback_ignored" and not facts["previously_rejected"]:
             continue
-        if key in ("ai_readme", "readme_thin") and not facts["readme_present"]:
-            continue  # nothing to judge: missing (no_readme covers it) or unverified
+        if key in ("ai_readme", "readme_thin") and (
+            not facts["readme_present"] or facts.get("readme_not_english")
+        ):
+            continue  # nothing to judge (missing/unverified), or judged in another language
         if key in answers and answers[key]["noul"] >= t and key not in reasons:
             reasons.append(key)
     return ("REJECT" if reasons else "PASS"), reasons

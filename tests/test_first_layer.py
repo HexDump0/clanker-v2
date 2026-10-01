@@ -34,7 +34,10 @@ def jev_answers(**scores: float) -> dict[str, Any]:
 
 
 def make_reviewer(
-    answers: dict[str, Any], calls: list | None = None, files: list | None = None
+    answers: dict[str, Any],
+    calls: list | None = None,
+    files: list | None = None,
+    history: dict[str, Any] | None = None,
 ) -> FirstLayerReviewer:
     async def ask(state, questions):
         if calls is not None:
@@ -46,7 +49,12 @@ def make_reviewer(
     )
 
     async def no_evidence(prompt: str, cutoff: str) -> dict[str, Any]:
-        return {"files": files or [], "release_assets": None, "banner": "project_screenshot"}
+        return {
+            "files": files or [],
+            "release_assets": None,
+            "banner": "project_screenshot",
+            "history": history,
+        }
 
     reviewer._evidence = no_evidence  # type: ignore[method-assign]
     return reviewer

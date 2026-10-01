@@ -257,6 +257,20 @@ def _phrases(reason: str, ctx: RejectContext) -> list[str]:
         ]
     if reason == "untitled":
         return ["your project seems to be named 'untitled', please give it a proper name"]
+    if reason == "pre_event_undeclared":
+        return [
+            "it looks like this project was started before Stardance (June 1st), so please mark "
+            "it as an updated project when you reship",
+            "your repo has commits from before June 1st, so this needs to be shipped as an "
+            "updated project. please mark it as one and reship",
+        ]
+    if reason == "readme_not_english":
+        return [
+            "your README needs to be in English. you can keep the original too, just add an "
+            "English version or link one at the top",
+            "please write the README in English (or link an English version at the top) so "
+            "reviewers and voters can read it",
+        ]
     if reason == "needs_api_key":
         return [
             "please include a working API key in the demo so it can be tested. Hack Club "
@@ -276,7 +290,9 @@ ORDER = [
     "no_source",
     "no_readme",
     "untitled",
+    "pre_event_undeclared",
     "readme_not_raw",
+    "readme_not_english",
     "bad_hosting",
     "demo_is_repo",
     "demo_is_video",

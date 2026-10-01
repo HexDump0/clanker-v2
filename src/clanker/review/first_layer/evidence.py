@@ -22,11 +22,13 @@ from pydantic_ai import Agent, BinaryContent
 from clanker.config import Settings
 from clanker.forges import Repo, parse_repo
 from clanker.llm import build_model, build_routing_model_settings
+from clanker.review.first_layer.facts import CUTOFF
 
 HEAD, MIDDLE = 2_500, 1_500
 MAX_TREE_PAGES = 10  # GitLab: 100 entries a page; Gitea: 1000
 MAX_SIZED_PATHS = 300  # GitLab GraphQL size lookup
 TREE_PATHS = 400  # file list handed to Jev when the packet has no GitHub tree
+CUTOFF_ISO = f"{CUTOFF.isoformat()}T00:00:00Z"  # Stardance start (June 1, 2026)
 MAX_IMAGE_BYTES = 8_000_000
 
 SKIP = re.compile(
@@ -183,6 +185,7 @@ async def _github_evidence(
                 if e.get("type") == "blob"
             ]
             await _add_files(blobs, out, read)
+        out["history"] = await _github_history(gh, base, full, repo.path.split("/")[0])
     releases = await gh.get(f"{base}/releases", params={"per_page": 20})
     if releases.status_code == 200:
         out["release_assets"] = [
@@ -236,6 +239,7 @@ async def _gitlab_evidence(
             return r.text if r.status_code == 200 else None
 
         await _add_files([(p, sizes.get(p, 0)) for p in paths], out, read)
+    out["history"] = await _gitlab_history(web, api, ref)
     releases = await web.get(f"{api}/releases", params={"per_page": 20})
     if releases.status_code == 200:
         out["release_assets"] = [
@@ -278,3 +282,59 @@ async def _gitea_evidence(
             for a in rel.get("assets") or []
             if (a.get("created_at") or "") <= cutoff
         ]
+
+
+def _page_count(r: httpx.Response) -> int:
+    """Total items of a per_page=1 listing, from its rel="last" link."""
+    last = r.links.get("last", {}).get("url")
+    m = re.search(r"[?&]page=(\d+)", last or "")
+    return int(m.group(1)) if m else len(r.json())
+
+
+async def _github_history(
+    gh: httpx.AsyncClient, base: str, sha: str, owner: str
+) -> dict[str, Any] | None:
+    """Commit counts around the event cutoff (the packet only carries the latest 30).
+
+    Only the owner's commits count as their pre-event work: a template or upstream
+    history by other authors isn't theirs. Commits with no linked GitHub account count
+    as the owner's (most beginners haven't linked their git email).
+    """
+    total = await gh.get(f"{base}/commits", params={"sha": sha, "per_page": 1})
+    pre = await gh.get(
+        f"{base}/commits", params={"sha": sha, "until": CUTOFF_ISO, "per_page": 100}
+    )
+    if total.status_code != 200 or pre.status_code != 200:
+        return None
+    commits = pre.json()
+    own = [
+        c
+        for c in commits
+        if ((c.get("author") or {}).get("login") or owner).lower() == owner.lower()
+    ]
+    dates = sorted((c.get("commit") or {}).get("author", {}).get("date") or "" for c in own)
+    return {
+        "total_commits": _page_count(total),
+        "pre_cutoff_commits": len(commits),  # capped at 100
+        "pre_cutoff_own_commits": len(own),
+        "oldest_own_commit": (dates[0][:10] if dates and dates[0] else None),
+    }
+
+
+async def _gitlab_history(web: httpx.AsyncClient, api: str, ref: str) -> dict[str, Any] | None:
+    """GitLab has no account links on commits, so every pre-cutoff commit counts."""
+    total = await web.get(f"{api}/repository/commits", params={"ref_name": ref, "per_page": 1})
+    pre = await web.get(
+        f"{api}/repository/commits",
+        params={"ref_name": ref, "until": CUTOFF_ISO, "per_page": 100},
+    )
+    if total.status_code != 200 or pre.status_code != 200:
+        return None
+    commits = pre.json()
+    dates = sorted(c.get("authored_date") or "" for c in commits)
+    return {
+        "total_commits": int(total.headers.get("x-total") or len(total.json())),
+        "pre_cutoff_commits": len(commits),
+        "pre_cutoff_own_commits": len(commits),
+        "oldest_own_commit": (dates[0][:10] if dates and dates[0] else None),
+    }

@@ -14,6 +14,7 @@ from typing import Any
 
 from clanker.forges import is_raw_file_url, parse_repo
 from clanker.review.first_layer.ai_css import modern_ai_css_signals
+from clanker.review.first_layer.language import readme_not_english
 
 CUTOFF = date(2026, 6, 1)
 
@@ -63,7 +64,13 @@ CODE_EXTS = (
 
 # Long raw texts used by code rules but never shown to Jev.
 # Kept out of Jev's state so the code CSS rule doesn't silently change Jev's answers.
-PRIVATE_FACTS = ("demo_text", "demo_render_all", "modern_ai_css_signals")
+PRIVATE_FACTS = (
+    "demo_text",
+    "demo_render_all",
+    "modern_ai_css_signals",
+    "readme_not_english",
+    "commit_history",
+)
 
 
 def cut(text: str, limit: int) -> str:
@@ -159,6 +166,9 @@ def code_facts(sec: dict[str, str]) -> dict[str, Any]:
         ),
         "demo_url_rejected_platforms": bad,
         "readme_present": "```markdown" in sec.get("readme", ""),
+        # Language the README prose is in when it isn't English (and no English version
+        # is linked); None when English or unclear.
+        "readme_not_english": _readme_language_issue(sec.get("readme", "")),
         # Non-GitHub host unreachable: a missing README is unknown, not proven.
         "readme_unverified": "not verified)" in sec.get("readme", ""),
         "readme_chars": len(sec.get("readme", "")),
@@ -199,6 +209,12 @@ def code_facts(sec: dict[str, str]) -> dict[str, Any]:
     }
 
 
+def _readme_language_issue(section: str) -> str | None:
+    m = re.search(r"```markdown\n(.*)```", section, re.S)
+    guess = readme_not_english(m.group(1)) if m else None
+    return guess.language if guess else None
+
+
 def packet_state(sec: dict[str, str], facts: dict[str, Any]) -> dict[str, Any]:
     """Packet sections (bounded) plus the public computed facts, as Jev's `state`."""
     return {
@@ -214,6 +230,8 @@ def add_evidence(facts: dict[str, Any], evidence: dict[str, Any]) -> None:
         banner_label=evidence.get("banner"),
         release_assets=evidence.get("release_assets"),
         tree_code_files_v2=evidence.get("tree_code_files"),
+        # Commit counts around the cutoff from the forge API (GitHub/GitLab), or None.
+        commit_history=evidence.get("history"),
         modern_ai_css_signals=modern_ai_css_signals(
             "\n".join(
                 f["excerpt"]

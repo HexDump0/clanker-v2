@@ -61,12 +61,25 @@ def _reason_evidence(reason: str, result: FirstLayerResult) -> list[str]:
         "banner_bad": f"Banner looks like: {(facts.get('banner_label') or '?').replace('_', ' ')}",
         "no_source": "No code files and no language bytes in the repo",
         "untitled": f"Project name: {facts.get('project_name') or '(empty)'}",
+        "readme_not_english": f"README prose looks {facts.get('readme_not_english') or '?'}, "
+        "with no English version linked",
+        "pre_event_undeclared": _history_text(facts) + "; not declared as an updated project",
     }
     if reason in by_code:
         out.append(by_code[reason])
     if reason == "demo_broken" and facts.get("demo_http_status"):
         out.append(f"Demo returned HTTP {facts['demo_http_status']}")
     return out
+
+
+def _history_text(facts: dict[str, Any]) -> str:
+    h = facts.get("commit_history") or {}
+    pre = h.get("pre_cutoff_own_commits", 0)
+    count = f"{pre}+" if pre >= 100 else str(pre)
+    text = f"{count} of {h.get('total_commits', '?')} commits before June 1"
+    if pre and h.get("oldest_own_commit"):
+        text += f" (oldest {h['oldest_own_commit']})"
+    return text
 
 
 def _jev_rows(result: FirstLayerResult) -> list[dict[str, Any]]:
@@ -115,6 +128,15 @@ def _code_checks(result: FirstLayerResult, packet: ReviewPacket) -> list[dict[st
     if facts.get("readme_present"):
         raw = facts.get("readme_url_is_raw")
         row("README link is raw", "pass" if raw else "fail", packet.cert.readme_url or "(none)")
+    if facts.get("readme_present"):
+        lang = facts.get("readme_not_english")
+        row("README language", "fail" if lang else "pass", f"Looks {lang}" if lang else "English")
+    if facts.get("commit_history"):
+        pre = "pre_event_undeclared" in result.reasons
+        declared = "declared as an update" if facts.get("declared_as_updated_project") else (
+            "not declared as an update"
+        )
+        row("Project history", "fail" if pre else "info", f"{_history_text(facts)}; {declared}")
     bad = facts.get("demo_url_rejected_platforms") or []
     if facts.get("demo_url"):
         row(

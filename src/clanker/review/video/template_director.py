@@ -120,12 +120,15 @@ def plan_scenes(reasons: Sequence[str], inputs: RejectVideoInputs, seed: str) ->
                     + (", and declare AI use" if undeclared else ""),
                 )
             )
-        elif reason in ("ai_readme", "readme_thin", "needs_api_key") and readme_url:
+        elif reason in ("ai_readme", "readme_thin", "needs_api_key", "readme_not_english") and (
+            readme_url
+        ):
             both = "ai_readme" in reasons and "readme_thin" in reasons
             title = {
                 "ai_readme": "The README reads AI-written",
                 "readme_thin": "The README needs more detail",
                 "needs_api_key": "It needs your own API key",
+                "readme_not_english": "The README isn't in English",
             }[reason]
             caption = {
                 "ai_readme": "Write it yourself from scratch: what you built, how and why you "
@@ -135,12 +138,14 @@ def plan_scenes(reasons: Sequence[str], inputs: RejectVideoInputs, seed: str) ->
                 "made it.",
                 "needs_api_key": "Reviewers can't bring their own key. Include a working key or "
                 "proxy (Hack Club AI is a free option).",
+                "readme_not_english": "Write it in English, or link an English version at the "
+                "top.",
             }[reason]
             # AI README: no highlight, for the same reason as AI code (the whole README is the
             # problem, not a line). Thin README: the heading shows how little is there.
             highlight = (
                 None
-                if reason == "ai_readme"
+                if reason in ("ai_readme", "readme_not_english")
                 else _readme_heading(inputs.readme_markdown)
                 if reason == "readme_thin"
                 else next(
@@ -160,6 +165,7 @@ def plan_scenes(reasons: Sequence[str], inputs: RejectVideoInputs, seed: str) ->
                         "ai_readme": "Write the README yourself, from scratch",
                         "readme_thin": "Expand the README",
                         "needs_api_key": "Make the demo work without a user API key",
+                        "readme_not_english": "Write the README in English",
                     }[reason],
                 )
             )
@@ -317,6 +323,17 @@ FALLBACK_CARDS: dict[str, tuple[str, str, str]] = {
         "There's no README",
         "Add a README explaining what it is and how to use it.",
         "Add a README",
+    ),
+    "pre_event_undeclared": (
+        "Started before Stardance",
+        "This repo has work from before June 1st. Mark the project as an update when you "
+        "reship.",
+        "Mark it as an updated project",
+    ),
+    "readme_not_english": (
+        "The README isn't in English",
+        "Write it in English, or link an English version at the top.",
+        "Write the README in English",
     ),
     "untitled": (
         "The project needs a name",
