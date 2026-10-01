@@ -162,9 +162,10 @@
     const info = dashInfo.get(r.cert_id);
     const statusVal = h("span", { class: "v" }, "…");
     const kv = h("div", { class: "kv" }, h("span", { class: "k" }, "Dashboard status"), statusVal);
-    const attach = h("input", { type: "checkbox", id: "attach" });
-    attach.checked = !!r.video_path && !r.manual_review;
-    const attachRow = r.video_path ? h("label", { class: "check", for: "attach" }, attach, "Attach Clanker's video") : null;
+    // The video is part of the rejection: always attached, except when Clanker got this one wrong (its video shows the wrong reasons).
+    const withVideo = !!r.video_path && !r.manual_review;
+    const attachRow = h("div", { class: "kv" }, h("span", { class: "k" }, "Video"),
+      h("span", { class: "v" }, withVideo ? "Clanker's video is attached" : r.video_path ? "Not attached (Clanker was wrong)" : "None for this ship"));
     const note = h("div", { class: "hint", style: "margin-top:8px" });
     const btn = h("button", { class: "btn t bad block" }, "Reject the project");
 
@@ -184,7 +185,7 @@
         .catch((e) => { statusVal.textContent = "–"; note.textContent = `Couldn't read the dashboard: ${e.message}`; });
     } else apply(null);
 
-    btn.addEventListener("click", () => confirmReject(r, textarea.value, attach.checked));
+    btn.addEventListener("click", () => confirmReject(r, textarea.value, withVideo));
     return h("div", { class: "pc accent" }, h("div", { class: "pc-head" }, h("span", { class: "lbl" }, "Review")), kv, attachRow, h("div", { style: "margin-top:10px" }, btn), note);
   }
 

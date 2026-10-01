@@ -53,7 +53,7 @@ There is one queue: the **Clanker queue** (every review).
 ## Reviewing from the Clanker page
 Open a ship in the Clanker page (the sidebar entry inside the dashboard). **Feedback** is autofilled with Clanker's message and is
 fully editable; the video is attached for you. **Reject the project** (after a confirm step) runs the dashboard's real flow as *you*:
-claim the ship if it isn't claimed, attach Clanker's video (optional checkbox), then submit a `REJECTED` review with your feedback.
+claim the ship if it isn't claimed, attach Clanker's video (always, when there is one), then submit a `REJECTED` review with your feedback.
 - It runs in your browser with your own dashboard session (`dash.js`, relayed from the Clanker page iframe through `nav.js`). The Clanker
   server is never involved, so several reviewers can use it with their own accounts.
 - It's disabled when the ship is already approved/rejected, when another reviewer has it claimed, or when the Clanker page is opened from
