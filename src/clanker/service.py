@@ -107,7 +107,33 @@ async def review_and_report(ctx: AppContext, emission: PendingEmission) -> None:
         logger.exception("Review failed for cert %s", emission.cert.id)
         await ctx.announcer.post_failure(parent_ts)
         return
+    _remember_thread(ctx, emission.cert.id, parent_ts)
     await ctx.announcer.post_outcome(emission.cert, outcome, parent_ts)
+
+
+def _remember_thread(ctx: AppContext, cert_id: str, parent_ts: str) -> None:
+    """Keep the Slack thread with the result so a later "wrong" flag lands in it."""
+    from clanker.results import ResultStore
+
+    try:
+        ResultStore(ctx.settings.results_dir).set_slack_ts(cert_id, parent_ts)
+    except Exception:
+        logger.exception("Could not remember the Slack thread for cert %s", cert_id)
+
+
+async def flag_manual_review(ctx: AppContext, record) -> None:
+    """Tell Slack a human marked Clanker's review wrong (no-op without Slack)."""
+    if ctx.announcer is None:
+        return
+    fb = record.feedback
+    labels = dict(zip(record.reasons, record.reason_labels, strict=False))
+    await ctx.announcer.post_manual_review(
+        record.cert_id,
+        record.project_name,
+        parent_ts=record.slack_ts,
+        note=fb.note if fb else "",
+        wrong_reasons=[labels.get(c, c) for c in (fb.wrong_checks if fb else [])],
+    )
 
 
 async def review_for_extension(ctx: AppContext, cert_id: str) -> None:
@@ -133,6 +159,8 @@ async def review_for_extension(ctx: AppContext, cert_id: str) -> None:
         if parent_ts is not None and ctx.announcer is not None:
             await ctx.announcer.post_failure(parent_ts)
         raise
+    if parent_ts is not None:
+        _remember_thread(ctx, cert_id, parent_ts)
     if parent_ts is not None and cert is not None and ctx.announcer is not None:
         try:
             await ctx.announcer.post_outcome(cert, outcome, parent_ts)
@@ -335,6 +363,7 @@ async def run_all(settings: Settings) -> None:
                         settings,
                         ResultStore(settings.results_dir),
                         lambda cert_id: review_for_extension(ctx, cert_id),
+                        lambda record: flag_manual_review(ctx, record),
                     ),
                     name="extension-api",
                 )

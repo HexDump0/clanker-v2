@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
 if TYPE_CHECKING:
     from clanker.review.runner import ReviewOutcome
@@ -48,6 +48,13 @@ class ResultRecord(BaseModel):
     pdf_path: str | None = None
     created_at: str
     feedback: HumanFeedback | None = None
+    slack_ts: str | None = None  # thread the review was announced in (for manual-review flags)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def manual_review(self) -> bool:
+        """A human said Clanker got this one wrong: it needs a manual review."""
+        return self.feedback is not None and self.feedback.agreement == "wrong"
 
 
 def record_from_outcome(outcome: ReviewOutcome) -> ResultRecord:
@@ -104,6 +111,8 @@ class ResultStore:
             and previous.reasons == record.reasons
         ):
             record.feedback = previous.feedback
+        if previous is not None:
+            record.slack_ts = previous.slack_ts
         self._write(record)
         return record
 
@@ -140,6 +149,20 @@ class ResultStore:
         )
         self._write(record)
         return record
+
+    def clear_feedback(self, cert_id: str) -> ResultRecord:
+        record = self.get(cert_id)
+        if record is None:
+            raise KeyError(cert_id)
+        record.feedback = None
+        self._write(record)
+        return record
+
+    def set_slack_ts(self, cert_id: str, ts: str) -> None:
+        record = self.get(cert_id)
+        if record is not None:
+            record.slack_ts = ts
+            self._write(record)
 
     def export_feedback_jsonl(self) -> str:
         """Every human-labelled result, one JSON object per line (for evals)."""

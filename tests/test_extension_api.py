@@ -200,3 +200,44 @@ async def test_pdf_is_served_only_when_the_result_has_one(api, store, tmp_path):
     assert ok.status == 200 and ok.headers["Content-Type"] == "application/pdf"
     assert await ok.read() == b"%PDF-1.4 fake"
     assert (await api.get("/api/results/c2/pdf", headers=AUTH)).status == 404
+
+
+def test_wrong_label_means_manual_review_and_clearing_undoes_it(store):
+    store.save_outcome(make_outcome())
+    assert store.get("c1").manual_review is False
+    store.set_feedback("c1", "right")
+    assert store.get("c1").manual_review is False  # right is info only
+    store.set_feedback("c1", "wrong", note="has a README")
+    assert store.get("c1").manual_review is True
+    assert '"manual_review":true' in store.get("c1").model_dump_json()
+    store.clear_feedback("c1")
+    assert store.get("c1").feedback is None and store.get("c1").manual_review is False
+
+
+def test_slack_thread_survives_a_rereview(store):
+    store.save_outcome(make_outcome())
+    store.set_slack_ts("c1", "1.2")
+    store.save_outcome(make_outcome(verdict="APPROVE"))
+    assert store.get("c1").slack_ts == "1.2"
+
+
+async def test_wrong_notifies_once_on_the_change_and_right_never(store):
+    flagged: list[str] = []
+
+    async def flag(record) -> None:
+        flagged.append(record.cert_id)
+
+    store.save_outcome(make_outcome())
+    app = build_api(Settings(shipwrights_session="x"), store, fake_validator, on_manual_review=flag)
+    async with TestClient(TestServer(app)) as c:
+        post = lambda body: c.post("/api/results/c1/feedback", json=body, headers=AUTH)  # noqa: E731
+        assert (await post({"agreement": "right"})).status == 200
+        await post({"agreement": "wrong", "note": "has a README"})
+        await post({"agreement": "wrong", "note": "edited note"})  # still wrong: no re-notify
+        resp = await post({"agreement": "clear"})
+        assert (await resp.json())["manual_review"] is False
+        await post({"agreement": "wrong"})  # flagged again after being cleared
+        import asyncio
+
+        await asyncio.sleep(0.05)
+    assert flagged == ["c1", "c1"]

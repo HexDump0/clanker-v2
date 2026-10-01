@@ -335,6 +335,30 @@ class Announcer:
         )
         return ts
 
+    async def post_manual_review(
+        self,
+        cert_id: str,
+        project_name: str,
+        *,
+        parent_ts: str | None,
+        note: str,
+        wrong_reasons: list[str],
+    ) -> None:
+        """A human marked Clanker's review wrong: ask the reviewers to do this one by hand."""
+        lines = [
+            ":rotating_light: *Clanker got this one wrong, please review manually.* "
+            f"<{self._cert_link(cert_id)}|{project_name}>"
+        ]
+        if wrong_reasons:
+            lines.append("Marked wrong: " + ", ".join(wrong_reasons))
+        if note:
+            lines.append(f"> {note}")
+        if ping := self._ping_mrkdwn():
+            lines.append(f"cc {ping}")
+        await self._slack.chat_postMessage(
+            channel=self._channel, thread_ts=parent_ts, text="\n".join(lines)
+        )
+
     def _stardance_attachment(
         self,
         ship: AdminShip,

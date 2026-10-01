@@ -83,3 +83,28 @@ async def test_slack_down_does_not_block_the_review(tmp_path):
     await review_for_extension(make_ctx(tmp_path, announcer, review), "c1")
     review.assert_awaited_once_with("c1")
     announcer.post_outcome.assert_not_awaited()
+
+
+async def test_manual_review_flag_goes_in_the_ship_thread_with_the_note():
+    announcer, slack = make_announcer()
+    await announcer.post_manual_review(
+        "c1", "Project c1", parent_ts="5.5", note="it has a README", wrong_reasons=["no README"]
+    )
+    kwargs = slack.chat_postMessage.call_args.kwargs
+    assert kwargs["thread_ts"] == "5.5"
+    assert "Clanker got this one wrong, please review manually" in kwargs["text"]
+    assert "no README" in kwargs["text"] and "it has a README" in kwargs["text"]
+
+
+async def test_flag_manual_review_uses_the_stored_thread(tmp_path):
+    from clanker.service import flag_manual_review
+
+    store = ResultStore(tmp_path)
+    store.save_outcome(make_outcome("c1"))
+    store.set_slack_ts("c1", "7.7")
+    record = store.set_feedback("c1", "wrong", note="n", wrong_checks=["no_readme"])
+    announcer = SimpleNamespace(post_manual_review=AsyncMock())
+    await flag_manual_review(SimpleNamespace(announcer=announcer), record)
+    kwargs = announcer.post_manual_review.await_args.kwargs
+    assert kwargs["parent_ts"] == "7.7" and kwargs["wrong_reasons"] == ["no README"]
+    await flag_manual_review(SimpleNamespace(announcer=None), record)  # no Slack: no-op

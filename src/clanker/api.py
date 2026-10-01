@@ -3,8 +3,8 @@
 Auth is the caller's own Dashboard session token (``Authorization: Bearer <token>``). It is
 only *validated*: one read-only workplace request proves it is a live session with Dashboard
 access. It is cached (hashed) for a few minutes and never stored or used for anything else.
-The only writes are "Clanker was right/wrong" feedback and queueing a Clanker review that a user
-asked for (the extension's "Request review"). The extension attaches videos itself, from the
+The only writes are right/wrong labels ("wrong" flags the ship for manual review and tells Slack)
+and queueing a Clanker review a user asked for. The extension attaches videos itself, from the
 dashboard page, with the user's own session. A human submits the verdict in the dashboard.
 """
 
@@ -21,12 +21,13 @@ from typing import Any
 from aiohttp import web
 
 from clanker.config import Settings
-from clanker.results import ResultStore, is_valid_id
+from clanker.results import ResultRecord, ResultStore, is_valid_id
 from clanker.shipwrights import ShipwrightsClient
 from clanker.shipwrights.client import AuthenticationError, ShipwrightsError
 
 TokenValidator = Callable[[str], Awaitable[bool]]
 ReviewFn = Callable[[str], Awaitable[object]]
+ManualReviewFn = Callable[[ResultRecord], Awaitable[object]]
 VALID_TTL = 300.0
 REVIEW_COOLDOWN = 60.0  # seconds before the same cert can be re-requested
 
@@ -36,6 +37,7 @@ STORE = web.AppKey("store", ResultStore)
 SETTINGS = web.AppKey("settings", Settings)
 VALIDATOR = web.AppKey("validator", Callable)
 JOBS = web.AppKey("jobs", object)
+FLAG = web.AppKey("flag", object)
 AUTH_CACHE = web.AppKey("auth_cache", dict)
 
 
@@ -179,18 +181,39 @@ async def get_pdf(request: web.Request) -> web.StreamResponse:
 
 
 async def post_feedback(request: web.Request) -> web.Response:
+    """Save a human label. "wrong" flags the ship for manual review (and tells Slack once)."""
     body = await request.json()
     agreement = body.get("agreement")
-    if agreement not in ("right", "wrong"):
-        return web.json_response({"error": "agreement must be 'right' or 'wrong'"}, status=400)
-    _record_or_404(request)
-    record = request.app[STORE].set_feedback(
-        request.match_info["cert_id"],
-        agreement,
-        note=str(body.get("note", "")),
-        wrong_checks=[str(c) for c in body.get("wrong_checks", [])],
-    )
+    if agreement not in ("right", "wrong", "clear"):
+        return web.json_response(
+            {"error": "agreement must be 'right', 'wrong' or 'clear'"}, status=400
+        )
+    previous = _record_or_404(request)
+    store = request.app[STORE]
+    cert_id = request.match_info["cert_id"]
+    if agreement == "clear":
+        record = store.clear_feedback(cert_id)
+    else:
+        record = store.set_feedback(
+            cert_id,
+            agreement,
+            note=str(body.get("note", "")),
+            wrong_checks=[str(c) for c in body.get("wrong_checks", [])],
+        )
+    flag: ManualReviewFn | None = request.app[FLAG]
+    if record.manual_review and not previous.manual_review and flag is not None:
+        # Only on the change into "wrong", so editing the note doesn't re-notify everyone.
+        task = asyncio.create_task(_flag(flag, record), name=f"manual-review-{cert_id}")
+        request.app.setdefault("_bg", set()).add(task)
+        task.add_done_callback(request.app["_bg"].discard)
     return web.json_response(record.model_dump(mode="json"))
+
+
+async def _flag(flag: ManualReviewFn, record: ResultRecord) -> None:
+    try:
+        await flag(record)
+    except Exception:
+        logger.exception("Could not announce manual review for cert %s", record.cert_id)
 
 
 async def get_feedback_export(request: web.Request) -> web.Response:
@@ -228,12 +251,14 @@ def build_api(
     store: ResultStore,
     validator: TokenValidator | None = None,
     review: ReviewFn | None = None,
+    on_manual_review: ManualReviewFn | None = None,
 ) -> web.Application:
     app = web.Application(middlewares=[_auth_and_cors])
     app[STORE] = store
     app[SETTINGS] = settings
     app[VALIDATOR] = validator or dashboard_validator(settings)
     app[AUTH_CACHE] = {}
+    app[FLAG] = on_manual_review
     app[JOBS] = ReviewJobs(review, settings.max_concurrent_reviews) if review else None
     app.router.add_get("/api/results", list_results)
     app.router.add_get("/api/feedback.jsonl", get_feedback_export)
@@ -247,9 +272,14 @@ def build_api(
 
 
 async def run_extension_api(
-    settings: Settings, store: ResultStore, review: ReviewFn | None = None
+    settings: Settings,
+    store: ResultStore,
+    review: ReviewFn | None = None,
+    on_manual_review: ManualReviewFn | None = None,
 ) -> None:
-    runner = web.AppRunner(build_api(settings, store, review=review))
+    runner = web.AppRunner(
+        build_api(settings, store, review=review, on_manual_review=on_manual_review)
+    )
     await runner.setup()
     await web.TCPSite(runner, settings.extension_api_host, settings.extension_api_port).start()
     logger.info(
