@@ -110,6 +110,31 @@
   document.addEventListener("keydown", (e) => e.key === "Escape" && overlay && closeOverlay());
   addEventListener("resize", placeOverlay);
 
+  // ---- bridge: the Clanker page (iframe) asks us to call the dashboard as the logged-in reviewer ----
+  const ID_RE = /^[0-9a-zA-Z-]{6,64}$/;
+  const SLUG_RE = /^[a-z0-9-]{1,40}$/i;
+  addEventListener("message", async (e) => {
+    const frame = overlay?.querySelector("iframe");
+    // Only the iframe we created, and only from the extension's own origin.
+    if (!frame || e.source !== frame.contentWindow || e.origin !== new URL(frame.src).origin) return;
+    const m = e.data;
+    if (!m || m.clanker !== "dash" || typeof m.id !== "number") return;
+    const reply = (msg) => frame.contentWindow.postMessage({ clanker: "dash-result", id: m.id, ...msg }, e.origin);
+    const progress = (text) => frame.contentWindow.postMessage({ clanker: "dash-progress", id: m.id, text }, e.origin);
+    try {
+      const { slug, id } = m.payload || {};
+      if (!SLUG_RE.test(String(slug)) || !ID_RE.test(String(id))) throw new Error("Bad ship reference.");
+      if (m.op === "status") return reply({ ok: true, data: await ClankerDash.status(slug, id) });
+      if (m.op === "reject") {
+        const { comment, video } = m.payload;
+        return reply({ ok: true, data: await ClankerDash.reject({ slug, id, comment, video: video instanceof Blob ? video : null }, progress) });
+      }
+      throw new Error("Unknown request.");
+    } catch (err) {
+      reply({ ok: false, error: err.message || String(err) });
+    }
+  });
+
   let scheduled = false;
   new MutationObserver(() => {
     if (scheduled) return;

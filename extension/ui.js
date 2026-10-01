@@ -297,5 +297,5 @@
     return root;
   }
 
-  globalThis.ClankerUI = { h, icon, svgFrom, verdictMeta, shown, badge, statusText, timeAgo, reasonPairs, copyText, toastFactory, parts, detail };
+  globalThis.ClankerUI = { h, icon, svgFrom, verdictMeta, shown, videoBlob, badge, statusText, timeAgo, reasonPairs, copyText, toastFactory, parts, detail };
 })();

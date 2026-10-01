@@ -32,6 +32,7 @@
       "js": [
         "api.js",
         "ui.js",
+        "dash.js",
         "content.js",
         "nav.js"
       ],
@@ -59,6 +60,7 @@
         "judgements.js",
         "api.js",
         "ui.js",
+        "bridge.js",
         "ui.css",
         "page.css",
         "panel.css",

@@ -36,24 +36,6 @@
     return true;
   }
 
-  // The same three steps the dashboard's own upload button performs, with the user's own session.
-  async function uploadVideo(slug, id, blob) {
-    const file = new File([blob], `${id}.mp4`, { type: "video/mp4" });
-    const base = `/api/v1/workplaces/${slug}/certifications/${id}/upload`;
-    const q = new URLSearchParams({ filename: file.name, contentType: "video/mp4", size: String(file.size) });
-    const presign = await fetch(`${base}?${q}`);
-    if (!presign.ok) throw new Error((await presign.json()).error ?? "could not start upload");
-    const { uploadUrl, publicUrl } = await presign.json();
-    const put = await fetch(uploadUrl, { method: "PUT", headers: { "Content-Type": "video/mp4" }, body: file });
-    if (!put.ok) throw new Error(`upload failed: ${put.status}`);
-    const attach = await fetch(base, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url: publicUrl }),
-    });
-    if (!attach.ok) throw new Error((await attach.json()).error ?? "could not attach video");
-  }
-
   const stylesheet = (file) => h("link", { rel: "stylesheet", href: ext.runtime.getURL(file) });
   // Resolves when the stylesheet loads, fails, or after a short wait (never block the panel on it).
   const loaded = (link) =>
@@ -119,7 +101,7 @@
         useReason: fillCommentBox,
         async useVideo(blob) {
           toast("Uploading video…");
-          await uploadVideo(slug, id, blob);
+          await ClankerDash.uploadVideo(slug, id, blob);
           toast("Video attached. Reloading…", "ok");
           setTimeout(() => location.reload(), 1200);
         },

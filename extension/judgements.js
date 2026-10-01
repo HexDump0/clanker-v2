@@ -1,8 +1,11 @@
 // Clanker judgements. A dashboard-style table of everything Clanker judged, and a detail view where a
 // human confirms or overrules Clanker's call. The real verdict is still submitted by a human on the dashboard.
 (() => {
-  const { h, icon, badge, statusText, timeAgo, reasonPairs, toastFactory, parts } = ClankerUI;
-  const DASH = "https://ds.shipwrights.dev/stardance/certifications/";
+  const { h, icon, badge, statusText, timeAgo, reasonPairs, toastFactory, parts, videoBlob } = ClankerUI;
+  const SLUG = "stardance";
+  const DASH = `https://ds.shipwrights.dev/${SLUG}/certifications/`;
+  const drafts = new Map();   // edited feedback text per ship (survives re-renders)
+  const dashInfo = new Map(); // last known dashboard status per ship
   const ID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
   const KEY = "clanker.page";
 
@@ -134,6 +137,83 @@
   }
   const renderTable = () => { const old = document.getElementById("tablebox"); if (old) old.replaceWith(tableBox()); };
 
+  // ---------- reviewing from here ----------
+  const STATUS_TONE = { PENDING: "warn", IN_REVIEW: "info", APPROVED: "ok", REJECTED: "bad", RETURNED: "flag" };
+
+  function feedbackCard(r) {
+    const manual = !!r.manual_review;
+    const clanker = r.message || "";
+    if (!drafts.has(r.cert_id)) drafts.set(r.cert_id, manual ? "" : clanker); // never prefill a message Clanker got wrong
+    const text = h("textarea", { class: "fb-text", rows: "7", maxlength: "5000", spellcheck: "true",
+      placeholder: "Feedback for the shipper (required to reject)" });
+    text.value = drafts.get(r.cert_id);
+    const count = h("span", { class: "hint" });
+    const sync = () => { drafts.set(r.cert_id, text.value); count.textContent = `${text.value.length} / 5000`; };
+    text.addEventListener("input", sync); sync();
+    const reset = clanker && h("button", { class: "btn", title: "Put Clanker's message back", onclick: () => { text.value = clanker; sync(); text.focus(); } },
+      manual ? "Insert Clanker's message" : "Reset to Clanker's");
+    const copy = h("button", { class: "btn", onclick: async () => toast((await ClankerUI.copyText(text.value)) ? "Copied to clipboard" : "Could not copy", "ok") }, "Copy");
+    const hint = manual ? "Clanker got this one wrong, so its message isn't filled in." : clanker ? "Filled in from Clanker. Edit it before you reject." : "Clanker didn't write a message for this one.";
+    return { el: h("div", { class: "pc" }, h("div", { class: "pc-head" }, h("span", { class: "lbl" }, "Feedback"), h("div", { class: "row-actions" }, reset, copy)),
+      text, h("div", { class: "pc-head", style: "margin:8px 0 0" }, h("span", { class: "hint" }, hint), count)), text };
+  }
+
+  function reviewCard(r, textarea) {
+    const info = dashInfo.get(r.cert_id);
+    const statusVal = h("span", { class: "v" }, "…");
+    const kv = h("div", { class: "kv" }, h("span", { class: "k" }, "Dashboard status"), statusVal);
+    const attach = h("input", { type: "checkbox", id: "attach" });
+    attach.checked = !!r.video_path && !r.manual_review;
+    const attachRow = r.video_path ? h("label", { class: "check", for: "attach" }, attach, "Attach Clanker's video") : null;
+    const note = h("div", { class: "hint", style: "margin-top:8px" });
+    const btn = h("button", { class: "btn t bad block" }, "Reject the project");
+
+    const apply = (i) => {
+      const done = i && (i.status === "APPROVED" || i.status === "REJECTED");
+      const other = i && i.status === "IN_REVIEW" && !i.viewerIsClaimer && !i.viewerIsGlobalAdmin;
+      statusVal.replaceChildren(i ? h("span", { class: `st ${STATUS_TONE[i.status] || "neutral"}` }, i.status.toLowerCase().replace("_", " ")) : "–");
+      btn.disabled = !ClankerBridge.available || done || other;
+      note.textContent = !ClankerBridge.available ? "Open Clanker from the dashboard sidebar to review from here."
+        : done ? `Already ${i.status.toLowerCase()} on the dashboard.`
+        : other ? `Claimed by ${i.claimer?.name || i.claimer?.username || "someone else"}.`
+        : "Uses your dashboard account. A human always submits the review.";
+    };
+    apply(info);
+    if (ClankerBridge.available) {
+      ClankerBridge.status(SLUG, r.cert_id).then((i) => { dashInfo.set(r.cert_id, i); apply(i); })
+        .catch((e) => { statusVal.textContent = "–"; note.textContent = `Couldn't read the dashboard: ${e.message}`; });
+    } else apply(null);
+
+    btn.addEventListener("click", () => confirmReject(r, textarea.value, attach.checked));
+    return h("div", { class: "pc accent" }, h("div", { class: "pc-head" }, h("span", { class: "lbl" }, "Review")), kv, attachRow, h("div", { style: "margin-top:10px" }, btn), note);
+  }
+
+  function confirmReject(r, comment, withVideo) {
+    comment = comment.trim();
+    if (!comment) return toast("Write some feedback for the shipper first.", "bad");
+    const status = h("div", { class: "hint" });
+    const go = h("button", { class: "btn t bad" }, "Reject project");
+    const cancel = h("button", { class: "btn ghost", onclick: () => d.close() }, "Cancel");
+    const d = dialog([
+      h("h3", {}, `Reject ${r.project_name}?`),
+      h("div", { class: "help" }, `This submits a REJECTED review on the dashboard as you. It will claim the ship if it isn't claimed${withVideo ? ", attach Clanker's video" : ""} and send this feedback to the shipper:`),
+      h("pre", { class: "msg", style: "max-height:180px" }, comment),
+      status, h("div", { class: "row-actions" }, cancel, go)]);
+    go.addEventListener("click", async () => {
+      go.disabled = cancel.disabled = true;
+      try {
+        let video = null;
+        if (withVideo) { status.textContent = "Loading the video…"; video = await videoBlob(ClankerApi, r.cert_id); }
+        await ClankerBridge.reject({ slug: SLUG, id: r.cert_id, comment, video }, (t) => (status.textContent = t));
+        dashInfo.set(r.cert_id, { status: "REJECTED" });
+        drafts.delete(r.cert_id);
+        d.close(); toast(`Rejected ${r.project_name} on the dashboard`, "ok"); render(true);
+      } catch (e) {
+        status.textContent = e.message; status.className = "hint note-bad"; go.disabled = cancel.disabled = false;
+      }
+    });
+  }
+
   // ---------- detail view ----------
   function detailView(r) {
     const items = visible();
@@ -165,9 +245,9 @@
 
     p.pdfButton.classList.add("block"); p.rerunButton.classList.add("block");
     p.info.append(h("div", { class: "divider" }), p.pdfButton, p.rerunButton, h("div", { class: "hint", style: "margin-top:6px" }, p.rerunStatus));
-    const left = [p.message, p.video], right = [p.info];
-    if (p.reasons) (left.some(Boolean) ? right : left).push(p.reasons);
-    right.push(p.feedback);
+    const fb = feedbackCard(r);
+    const left = [fb.el, p.video], right = [reviewCard(r, fb.text), p.feedback, p.info];
+    if (p.reasons) right.push(p.reasons);
     const view = h("div", { class: "stack", style: "gap:16px" }, head, p.banner,
       h("div", { class: "dgrid" }, h("div", { class: "dcol" }, left), h("div", { class: "dcol" }, right)));
     view.clankerRight = p.right; view.clankerWrong = p.wrong;
