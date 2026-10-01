@@ -110,6 +110,36 @@ async def review_and_report(ctx: AppContext, emission: PendingEmission) -> None:
     await ctx.announcer.post_outcome(emission.cert, outcome, parent_ts)
 
 
+async def review_for_extension(ctx: AppContext, cert_id: str) -> None:
+    """A review requested from the browser extension: Slack updates, then the review itself.
+
+    Slack trouble never blocks the review; a failed review is re-raised so the extension
+    sees the error.
+    """
+    from clanker.results import ResultStore
+
+    rereview = ResultStore(ctx.settings.results_dir).get(cert_id) is not None
+    cert = None
+    parent_ts: str | None = None
+    if ctx.announcer is not None:
+        try:
+            cert = await ctx.client.get_certification(cert_id)
+            parent_ts = await ctx.announcer.announce_review_request(cert, rereview=rereview)
+        except Exception:
+            logger.exception("Could not announce extension review for cert %s", cert_id)
+    try:
+        outcome = await ctx.runner.review_cert(cert_id)
+    except Exception:
+        if parent_ts is not None and ctx.announcer is not None:
+            await ctx.announcer.post_failure(parent_ts)
+        raise
+    if parent_ts is not None and cert is not None and ctx.announcer is not None:
+        try:
+            await ctx.announcer.post_outcome(cert, outcome, parent_ts)
+        except Exception:
+            logger.exception("Could not post extension review outcome for cert %s", cert_id)
+
+
 async def run_watcher_service(ctx: AppContext) -> None:
     """Poll for new ships; reviews run as bounded concurrent tasks."""
     assert ctx.announcer is not None
@@ -304,7 +334,7 @@ async def run_all(settings: Settings) -> None:
                         run_extension_api,
                         settings,
                         ResultStore(settings.results_dir),
-                        ctx.runner.review_cert,
+                        lambda cert_id: review_for_extension(ctx, cert_id),
                     ),
                     name="extension-api",
                 )

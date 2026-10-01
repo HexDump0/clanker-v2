@@ -317,6 +317,24 @@ class Announcer:
         )
         return ts
 
+    async def announce_review_request(self, cert: CertSummary, *, rereview: bool) -> str:
+        """A review someone asked for from the browser extension; returns the thread parent ts.
+
+        One message, no ping: the original ship was already announced (or the person asking
+        is a reviewer already looking at it), so nobody is re-notified.
+        """
+        label = "Re-review requested" if rereview else "Review requested"
+        attachment = self._ship_attachment(cert, status_label=_AUTOMATING)
+        attachment["fallback"] = f"{label}: {cert.project_name}"
+        post = await self._slack.chat_postMessage(channel=self._channel, attachments=[attachment])
+        ts: str = post["ts"]
+        await self._slack.chat_postMessage(
+            channel=self._channel,
+            thread_ts=ts,
+            text=f"{label} from the browser extension. Running the automated review..",
+        )
+        return ts
+
     def _stardance_attachment(
         self,
         ship: AdminShip,
