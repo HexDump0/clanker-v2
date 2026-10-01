@@ -123,8 +123,21 @@
     } catch (e) {
       error = e.message;
     }
-    if (!record && !error) return; // Clanker hasn't judged this one: stay out of the way.
-
+    const reviewButton = (label) => {
+      const button = h("button", { class: "primary" }, label);
+      button.addEventListener("click", async () => {
+        button.disabled = true;
+        try {
+          const done = await ClankerApi.runReview(id, setStatus);
+          if (done.state === "failed") throw new Error(done.error || "review failed");
+          render(slug, id); // show the fresh result
+        } catch (e) {
+          setStatus(`Review failed: ${e.message}`);
+          button.disabled = false;
+        }
+      });
+      return button;
+    };
     const v = record ? VERDICT[record.verdict] || { label: record.verdict, color: "#71717a" } : null;
     const panel = h("div", { class: "panel", hidden: "" });
     const tab = h(
@@ -139,6 +152,16 @@
 
     if (error) {
       panel.append(h("h2", {}, "Clanker"), h("p", { class: "muted" }, error));
+      document.body.append(host);
+      return;
+    }
+    if (!record) {
+      panel.append(
+        h("h2", {}, "Clanker"),
+        h("p", { class: "muted" }, "Clanker hasn't reviewed this ship yet."),
+        h("div", { class: "row" }, reviewButton("Request Clanker review")),
+        status,
+      );
       document.body.append(host);
       return;
     }
@@ -196,6 +219,7 @@
     );
     if (!record.video_path) useVideo.disabled = true;
     panel.append(h("div", { class: "row" }, useReason, useVideo));
+    panel.append(h("div", { class: "row" }, reviewButton("Re-request Clanker review")));
 
     // Feedback: was Clanker right? "Wrong" asks which checks and why.
     panel.append(h("h3", {}, "Was Clanker right?"));

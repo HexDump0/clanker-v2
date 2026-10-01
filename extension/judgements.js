@@ -77,6 +77,14 @@
         } }, "Watch video") : null,
         h("button", { onclick: () => send("right") }, "Clanker was right"),
         h("button", { onclick: () => (wrongForm.hidden = !wrongForm.hidden) }, "Clanker was wrong"),
+        h("button", { onclick: async (e) => {
+          e.target.disabled = true;
+          try {
+            const done = await ClankerApi.runReview(r.cert_id, (t) => (status.textContent = t));
+            if (done.state === "failed") throw new Error(done.error || "review failed");
+            await load();
+          } catch (err) { status.textContent = `Review failed: ${err.message}`; e.target.disabled = false; }
+        } }, "Re-request review"),
         status),
       wrongForm,
     );

@@ -16,3 +16,6 @@ Plain MV3 JavaScript, no build step. The same folder loads in both browsers.
 - **Use video** downloads the video from Clanker and runs the dashboard's own 3-step upload (presign, PUT, attach) from the
   page with your session, then reloads. The server never uploads anything.
 - **Clanker was right/wrong** saves feedback on the result; "Export feedback" on the judgements page downloads JSONL.
+- **Request / Re-request Clanker review** runs a review on the server (ships Clanker hasn't seen, or a fresh look at one it has).
+  One run per ship at a time, 60s cooldown, shares the review concurrency limit. A new result clears an old right/wrong label
+  if the verdict or reasons changed.

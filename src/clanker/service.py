@@ -304,6 +304,7 @@ async def run_all(settings: Settings) -> None:
                         run_extension_api,
                         settings,
                         ResultStore(settings.results_dir),
+                        ctx.runner.review_cert,
                     ),
                     name="extension-api",
                 )

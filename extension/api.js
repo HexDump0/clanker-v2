@@ -47,7 +47,11 @@
     });
     if (res.status === 401) throw new Error("Clanker rejected your dashboard session.");
     if (res.status === 404) return null;
-    if (!res.ok) throw new Error(`Clanker API error ${res.status}`);
+    if (!res.ok) {
+      let detail = "";
+      try { detail = (await res.json()).error || ""; } catch {}
+      throw new Error(detail || `Clanker API error ${res.status}`);
+    }
     return raw ? res : res.json();
   }
 
@@ -57,6 +61,19 @@
     listResults: (verdict) =>
       request("/api/results" + (verdict ? `?verdict=${encodeURIComponent(verdict)}` : "")),
     getResult: (id) => request(`/api/results/${encodeURIComponent(id)}`),
+    requestReview: (id) =>
+      request(`/api/results/${encodeURIComponent(id)}/review`, { method: "POST", body: {} }),
+    reviewStatus: (id) => request(`/api/results/${encodeURIComponent(id)}/review-status`),
+    // Ask for a review and wait until it finishes. Resolves with the final status.
+    async runReview(id, onStatus = () => {}) {
+      await this.requestReview(id);
+      for (;;) {
+        const s = await this.reviewStatus(id);
+        if (!s || s.state !== "running") return s || { state: "idle" };
+        onStatus("Clanker is reviewing… (about a minute)");
+        await new Promise((r) => setTimeout(r, 3000));
+      }
+    },
     exportFeedback: () => request("/api/feedback.jsonl", { raw: true }),
     sendFeedback: (id, body) =>
       request(`/api/results/${encodeURIComponent(id)}/feedback`, { method: "POST", body }),

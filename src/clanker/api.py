@@ -3,13 +3,14 @@
 Auth is the caller's own Dashboard session token (``Authorization: Bearer <token>``). It is
 only *validated*: one read-only workplace request proves it is a live session with Dashboard
 access. It is cached (hashed) for a few minutes and never stored or used for anything else.
-The only write is saving "Clanker was right/wrong" feedback. It never touches the Dashboard with
-anyone's token beyond validating it: the extension attaches videos itself, from the dashboard page,
-with the user's own session. A human submits the verdict in the dashboard.
+The only writes are "Clanker was right/wrong" feedback and queueing a Clanker review that a user
+asked for (the extension's "Request review"). The extension attaches videos itself, from the
+dashboard page, with the user's own session. A human submits the verdict in the dashboard.
 """
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 import time
@@ -19,19 +20,67 @@ from typing import Any
 from aiohttp import web
 
 from clanker.config import Settings
-from clanker.results import ResultStore
+from clanker.results import ResultStore, is_valid_id
 from clanker.shipwrights import ShipwrightsClient
 from clanker.shipwrights.client import AuthenticationError, ShipwrightsError
 
 TokenValidator = Callable[[str], Awaitable[bool]]
+ReviewFn = Callable[[str], Awaitable[object]]
 VALID_TTL = 300.0
+REVIEW_COOLDOWN = 60.0  # seconds before the same cert can be re-requested
 
 logger = logging.getLogger(__name__)
 
 STORE = web.AppKey("store", ResultStore)
 SETTINGS = web.AppKey("settings", Settings)
 VALIDATOR = web.AppKey("validator", Callable)
+JOBS = web.AppKey("jobs", object)
 AUTH_CACHE = web.AppKey("auth_cache", dict)
+
+
+class ReviewJobs:
+    """Background review runs requested from the extension (one per cert at a time)."""
+
+    def __init__(self, review: ReviewFn, concurrency: int) -> None:
+        self._review = review
+        self._semaphore = asyncio.Semaphore(concurrency)
+        self._status: dict[str, dict[str, Any]] = {}
+        self._tasks: set[asyncio.Task] = set()
+
+    def status(self, cert_id: str) -> dict[str, Any]:
+        entry = self._status.get(cert_id)
+        return (
+            {"state": entry["state"], "error": entry.get("error")} if entry else {"state": "idle"}
+        )
+
+    def cooldown_left(self, cert_id: str) -> float:
+        entry = self._status.get(cert_id)
+        if not entry or entry["state"] == "running":
+            return 0.0
+        return max(0.0, entry["finished"] + REVIEW_COOLDOWN - time.monotonic())
+
+    def start(self, cert_id: str) -> bool:
+        """Begin a review; False if one is already running for this cert."""
+        if self.status(cert_id)["state"] == "running":
+            return False
+        self._status[cert_id] = {"state": "running"}
+        task = asyncio.create_task(self._run(cert_id), name=f"ext-review-{cert_id}")
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+        return True
+
+    async def _run(self, cert_id: str) -> None:
+        try:
+            async with self._semaphore:
+                await self._review(cert_id)
+            self._status[cert_id] = {"state": "idle", "finished": time.monotonic()}
+        except Exception as exc:
+            logger.exception("Extension-requested review failed for cert %s", cert_id)
+            self._status[cert_id] = {
+                "state": "failed",
+                "error": str(exc) or type(exc).__name__,
+                "finished": time.monotonic(),
+            }
 
 
 def dashboard_validator(settings: Settings) -> TokenValidator:
@@ -133,26 +182,56 @@ async def get_feedback_export(request: web.Request) -> web.Response:
     )
 
 
+async def post_review(request: web.Request) -> web.Response:
+    """Request (or re-request) a Clanker review. The result replaces any earlier one."""
+    jobs: ReviewJobs | None = request.app[JOBS]
+    cert_id = request.match_info["cert_id"]
+    if jobs is None:
+        return web.json_response({"error": "reviews cannot be requested here"}, status=503)
+    if not is_valid_id(cert_id):
+        return web.json_response({"error": "invalid cert id"}, status=400)
+    wait = jobs.cooldown_left(cert_id)
+    if wait > 0:
+        return web.json_response(
+            {"error": f"reviewed a moment ago, try again in {wait:.0f}s"}, status=429
+        )
+    jobs.start(cert_id)  # already running: just report running
+    return web.json_response(jobs.status(cert_id), status=202)
+
+
+async def get_review_status(request: web.Request) -> web.Response:
+    jobs: ReviewJobs | None = request.app[JOBS]
+    if jobs is None:
+        return web.json_response({"state": "idle"})
+    return web.json_response(jobs.status(request.match_info["cert_id"]))
+
+
 def build_api(
-    settings: Settings, store: ResultStore, validator: TokenValidator | None = None
+    settings: Settings,
+    store: ResultStore,
+    validator: TokenValidator | None = None,
+    review: ReviewFn | None = None,
 ) -> web.Application:
     app = web.Application(middlewares=[_auth_and_cors])
     app[STORE] = store
     app[SETTINGS] = settings
     app[VALIDATOR] = validator or dashboard_validator(settings)
     app[AUTH_CACHE] = {}
+    app[JOBS] = ReviewJobs(review, settings.max_concurrent_reviews) if review else None
     app.router.add_get("/api/results", list_results)
     app.router.add_get("/api/feedback.jsonl", get_feedback_export)
     app.router.add_get("/api/results/{cert_id}", get_result)
     app.router.add_get("/api/results/{cert_id}/video", get_video)
     app.router.add_post("/api/results/{cert_id}/feedback", post_feedback)
+    app.router.add_post("/api/results/{cert_id}/review", post_review)
+    app.router.add_get("/api/results/{cert_id}/review-status", get_review_status)
     return app
 
 
-async def run_extension_api(settings: Settings, store: ResultStore) -> None:
-    import asyncio
-
-    runner = web.AppRunner(build_api(settings, store))
+async def run_extension_api(
+    settings: Settings, store: ResultStore, review: ReviewFn | None = None
+) -> None:
+    runner = web.AppRunner(build_api(settings, store, review=review))
     await runner.setup()
     await web.TCPSite(runner, settings.extension_api_host, settings.extension_api_port).start()
     logger.info(

@@ -53,10 +53,11 @@ async def api(store, tmp_path):
 def test_store_roundtrip_and_feedback_survives_rerun(store):
     store.save_outcome(make_outcome())
     store.set_feedback("c1", "wrong", note="readme exists", wrong_checks=["no_readme"])
-    store.save_outcome(make_outcome(verdict="APPROVE"))  # re-review keeps the human label
-    rec = store.get("c1")
-    assert rec.verdict == "APPROVE" and rec.feedback.agreement == "wrong"
+    store.save_outcome(make_outcome())  # same result: the human label stays
+    assert store.get("c1").feedback.agreement == "wrong"
     assert '"readme exists"' in store.export_feedback_jsonl()
+    store.save_outcome(make_outcome(verdict="APPROVE"))  # verdict changed: label no longer applies
+    assert store.get("c1").feedback is None
 
 
 def test_store_rejects_path_traversal(store):
@@ -109,3 +110,52 @@ async def test_dashboard_validator_accepts_live_session_and_rejects_401(monkeypa
     validate = dashboard_validator(Settings(shipwrights_session="x"))
     assert await validate("good") is True
     assert await validate("bad") is False
+
+
+async def test_request_review_runs_once_then_cools_down(store):
+    import asyncio
+
+    release = asyncio.Event()
+    calls: list[str] = []
+
+    async def review(cert_id: str) -> None:
+        calls.append(cert_id)
+        await release.wait()
+        store.save_outcome(make_outcome(cert_id))
+
+    VALIDATIONS.clear()
+    app = build_api(Settings(shipwrights_session="x"), store, fake_validator, review)
+    async with TestClient(TestServer(app)) as c:
+        first = await c.post("/api/results/new1/review", headers=AUTH)
+        assert first.status == 202 and (await first.json())["state"] == "running"
+        again = await c.post("/api/results/new1/review", headers=AUTH)
+        assert again.status == 202 and calls == ["new1"]  # not started twice
+        status = await (await c.get("/api/results/new1/review-status", headers=AUTH)).json()
+        assert status["state"] == "running"
+        release.set()
+        for _ in range(50):
+            status = await (await c.get("/api/results/new1/review-status", headers=AUTH)).json()
+            if status["state"] != "running":
+                break
+            await asyncio.sleep(0.01)
+        assert status["state"] == "idle" and store.get("new1") is not None
+        assert (await c.post("/api/results/new1/review", headers=AUTH)).status == 429
+        assert (await c.post("/api/results/..%2fx/review", headers=AUTH)).status in (400, 404)
+
+
+async def test_failed_review_reports_error(store):
+    async def review(cert_id: str) -> None:
+        raise RuntimeError("cert not found")
+
+    app = build_api(Settings(shipwrights_session="x"), store, fake_validator, review)
+    async with TestClient(TestServer(app)) as c:
+        await c.post("/api/results/bad1/review", headers=AUTH)
+        import asyncio
+
+        await asyncio.sleep(0.05)
+        status = await (await c.get("/api/results/bad1/review-status", headers=AUTH)).json()
+        assert status == {"state": "failed", "error": "cert not found"}
+
+
+async def test_request_review_unavailable_without_runner(api):
+    assert (await api.post("/api/results/x1/review", headers=AUTH)).status == 503

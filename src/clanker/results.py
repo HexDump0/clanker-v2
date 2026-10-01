@@ -22,6 +22,10 @@ if TYPE_CHECKING:
 _SAFE_ID = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
+def is_valid_id(cert_id: str) -> bool:
+    return bool(_SAFE_ID.match(cert_id))
+
+
 class HumanFeedback(BaseModel):
     agreement: Literal["right", "wrong"]
     note: str = ""
@@ -87,10 +91,14 @@ class ResultStore:
         os.replace(tmp, path)
 
     def save_outcome(self, outcome: ReviewOutcome) -> ResultRecord:
-        """Store a fresh result; keeps human feedback from an earlier run."""
+        """Store a fresh result; keeps human feedback only if the new result is unchanged."""
         record = record_from_outcome(outcome)
         previous = self.get(record.cert_id)
-        if previous is not None:
+        if (
+            previous is not None
+            and previous.verdict == record.verdict
+            and previous.reasons == record.reasons
+        ):
             record.feedback = previous.feedback
         self._write(record)
         return record
