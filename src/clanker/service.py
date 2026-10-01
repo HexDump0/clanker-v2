@@ -296,6 +296,19 @@ async def run_all(settings: Settings) -> None:
         async with asyncio.TaskGroup() as tg:
             tg.create_task(_supervise("watcher", run_watcher_service, ctx), name="watcher")
             tg.create_task(_supervise("slack", run_slack_service, ctx), name="slack")
+            if settings.extension_api_token:
+                from clanker.api import run_extension_api
+                from clanker.results import ResultStore
+
+                tg.create_task(
+                    _supervise(
+                        "extension-api",
+                        run_extension_api,
+                        settings,
+                        ResultStore(settings.results_dir),
+                    ),
+                    name="extension-api",
+                )
             if settings.daily_summary_enabled:
                 tg.create_task(
                     _supervise("daily-summary", run_daily_summary_service, ctx),

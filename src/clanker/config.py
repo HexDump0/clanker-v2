@@ -194,6 +194,14 @@ class Settings(BaseSettings):
     # Reviews
     max_concurrent_reviews: int = Field(default=2, ge=1)
     pdf_dir: Path = Path("data/pdfs")
+    results_dir: Path = Path("data/results")
+
+    # Browser-extension API (local only; off unless a token is set)
+    extension_api_token: str = Field(
+        default="",
+        description="Bearer token the browser extension sends. Empty = extension API disabled.",
+    )
+    extension_api_port: int = Field(default=8765, ge=1024, le=65535)
     github_token: str = Field(
         default="", description="Optional; raises GitHub API rate limits for review tools."
     )

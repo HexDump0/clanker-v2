@@ -1,0 +1,148 @@
+"""Persistent record of what Clanker decided for each cert.
+
+One JSON file per cert in ``Settings.results_dir``. The browser extension reads these
+through ``clanker.api``; human "Clanker was right/wrong" feedback is stored on the same
+record and can be exported as JSONL for evals. Nothing here talks to the Dashboard.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import TYPE_CHECKING, Literal
+
+from pydantic import BaseModel, Field
+
+if TYPE_CHECKING:
+    from clanker.review.runner import ReviewOutcome
+
+_SAFE_ID = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+class HumanFeedback(BaseModel):
+    agreement: Literal["right", "wrong"]
+    note: str = ""
+    wrong_checks: list[str] = Field(default_factory=list)
+    decided_at: str
+
+
+class ResultRecord(BaseModel):
+    cert_id: str
+    project_name: str
+    repo_url: str | None = None
+    demo_url: str | None = None
+    stardance_url: str | None = None
+    verdict: str  # REJECT | APPROVE | NEEDS_HUMAN (first layer) or the agent's verdict
+    summary: str = ""
+    reasons: list[str] = Field(default_factory=list)
+    message: str | None = None  # copy-ready text for the shipper (REJECT)
+    video_path: str | None = None
+    pdf_path: str | None = None
+    uploaded_video_url: str | None = None
+    created_at: str
+    feedback: HumanFeedback | None = None
+
+
+def record_from_outcome(outcome: ReviewOutcome) -> ResultRecord:
+    fl = outcome.first_layer
+    cert = outcome.packet.cert
+    if fl is not None:
+        verdict, summary, reasons = fl.verdict, fl.summary, list(fl.reasons or fl.unsure)
+    else:
+        verdict = outcome.review.verdict.value
+        summary = outcome.review.reasoning
+        reasons = list(outcome.review.required_fixes or [])
+    return ResultRecord(
+        cert_id=outcome.cert_id,
+        project_name=cert.project_name,
+        repo_url=cert.repo_url,
+        demo_url=cert.demo_url,
+        stardance_url=outcome.packet.stardance_url,
+        verdict=verdict,
+        summary=summary,
+        reasons=reasons,
+        message=outcome.reject_message,
+        video_path=str(outcome.video_path) if outcome.video_path else None,
+        pdf_path=str(outcome.pdf_path) if outcome.pdf_path else None,
+        created_at=datetime.now(UTC).isoformat(),
+    )
+
+
+class ResultStore:
+    def __init__(self, directory: Path) -> None:
+        self._dir = directory
+
+    def _path(self, cert_id: str) -> Path:
+        if not _SAFE_ID.match(cert_id):
+            raise ValueError(f"invalid cert id: {cert_id!r}")
+        return self._dir / f"{cert_id}.json"
+
+    def _write(self, record: ResultRecord) -> None:
+        self._dir.mkdir(parents=True, exist_ok=True)
+        path = self._path(record.cert_id)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(record.model_dump_json(indent=2))
+        os.replace(tmp, path)
+
+    def save_outcome(self, outcome: ReviewOutcome) -> ResultRecord:
+        """Store a fresh result; keeps human feedback/upload info from an earlier run."""
+        record = record_from_outcome(outcome)
+        previous = self.get(record.cert_id)
+        if previous is not None:
+            record.feedback = previous.feedback
+            record.uploaded_video_url = previous.uploaded_video_url
+        self._write(record)
+        return record
+
+    def get(self, cert_id: str) -> ResultRecord | None:
+        path = self._path(cert_id)
+        try:
+            return ResultRecord.model_validate_json(path.read_text())
+        except (FileNotFoundError, ValueError):
+            return None
+
+    def list(self, verdict: str | None = None) -> list[ResultRecord]:
+        records = [
+            r
+            for p in self._dir.glob("*.json")
+            if (r := self.get(p.stem)) is not None and (verdict is None or r.verdict == verdict)
+        ]
+        return sorted(records, key=lambda r: r.created_at, reverse=True)
+
+    def set_feedback(
+        self,
+        cert_id: str,
+        agreement: Literal["right", "wrong"],
+        note: str = "",
+        wrong_checks: list[str] | None = None,
+    ) -> ResultRecord:
+        record = self.get(cert_id)
+        if record is None:
+            raise KeyError(cert_id)
+        record.feedback = HumanFeedback(
+            agreement=agreement,
+            note=note.strip(),
+            wrong_checks=wrong_checks or [],
+            decided_at=datetime.now(UTC).isoformat(),
+        )
+        self._write(record)
+        return record
+
+    def set_uploaded_video(self, cert_id: str, url: str) -> ResultRecord:
+        record = self.get(cert_id)
+        if record is None:
+            raise KeyError(cert_id)
+        record.uploaded_video_url = url
+        self._write(record)
+        return record
+
+    def export_feedback_jsonl(self) -> str:
+        """Every human-labelled result, one JSON object per line (for evals)."""
+        return "".join(
+            json.dumps(r.model_dump(mode="json"), ensure_ascii=False) + "\n"
+            for r in reversed(self.list())
+            if r.feedback is not None
+        )

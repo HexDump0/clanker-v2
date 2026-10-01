@@ -21,6 +21,7 @@ from pathlib import Path
 from pydantic_ai import Agent
 
 from clanker.config import Settings
+from clanker.results import ResultStore
 from clanker.review.first_layer import FirstLayerResult, FirstLayerReviewer, to_review_output
 from clanker.review.first_layer.report import build_report_data
 from clanker.review.models import ReviewOutput, ReviewVerdict
@@ -112,8 +113,15 @@ class ReviewRunner:
         packet = await build_packet(self._client, cert_id, tools=self._tools)
         logger.info("Reviewing cert %s (%r)", cert_id, packet.cert.project_name)
         if self._first_layer is not None:
-            return await self._review_first_layer(cert_id, packet, self._first_layer)
-        return await self._review_with_agent(cert_id, packet)
+            outcome = await self._review_first_layer(cert_id, packet, self._first_layer)
+        else:
+            outcome = await self._review_with_agent(cert_id, packet)
+        try:
+            ResultStore(self._settings.results_dir).save_outcome(outcome)
+        except Exception:
+            # The browser extension's record is a convenience; never fail a review over it.
+            logger.exception("Could not save result for cert %s", cert_id)
+        return outcome
 
     async def _render_pdf(
         self, cert_id: str, packet: ReviewPacket, review: ReviewOutput

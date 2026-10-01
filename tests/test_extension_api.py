@@ -1,0 +1,109 @@
+from __future__ import annotations
+
+from types import SimpleNamespace
+
+import httpx
+import pytest
+from aiohttp.test_utils import TestClient, TestServer
+
+from clanker.api import build_api
+from clanker.config import Settings
+from clanker.results import ResultStore
+from clanker.review.models import ReviewVerdict
+from clanker.shipwrights import ShipwrightsClient
+
+TOKEN = "t0ken"
+AUTH = {"Authorization": f"Bearer {TOKEN}"}
+
+
+def make_outcome(cert_id="c1", verdict="REJECT", video=None):
+    cert = SimpleNamespace(project_name="Proj", repo_url="https://g/x", demo_url=None)
+    return SimpleNamespace(
+        cert_id=cert_id,
+        packet=SimpleNamespace(cert=cert, stardance_url="https://s/1"),
+        review=SimpleNamespace(verdict=ReviewVerdict.REJECT, reasoning="r", required_fixes=None),
+        first_layer=SimpleNamespace(
+            verdict=verdict, summary="sum", reasons=["no_readme"], unsure=[]
+        ),
+        reject_message="fix your readme",
+        video_path=video,
+        pdf_path=None,
+    )
+
+
+@pytest.fixture
+def store(tmp_path):
+    return ResultStore(tmp_path / "results")
+
+
+@pytest.fixture
+async def api(store, tmp_path):
+    settings = Settings(extension_api_token=TOKEN, shipwrights_session="x")
+    async with TestClient(TestServer(build_api(settings, store))) as c:
+        yield c
+
+
+def test_store_roundtrip_and_feedback_survives_rerun(store):
+    store.save_outcome(make_outcome())
+    store.set_feedback("c1", "wrong", note="readme exists", wrong_checks=["no_readme"])
+    store.save_outcome(make_outcome(verdict="APPROVE"))  # re-review keeps the human label
+    rec = store.get("c1")
+    assert rec.verdict == "APPROVE" and rec.feedback.agreement == "wrong"
+    assert '"readme exists"' in store.export_feedback_jsonl()
+
+
+def test_store_rejects_path_traversal(store):
+    with pytest.raises(ValueError):
+        store.get("../etc/passwd")
+
+
+async def test_requires_token(api):
+    assert (await api.get("/api/results")).status == 401
+    assert (await api.get("/api/results", headers={"Authorization": "Bearer nope"})).status == 401
+
+
+async def test_list_filter_and_feedback(api, store):
+    store.save_outcome(make_outcome("a", "REJECT"))
+    store.save_outcome(make_outcome("b", "APPROVE"))
+    resp = await api.get("/api/results?verdict=REJECT", headers=AUTH)
+    assert [r["cert_id"] for r in await resp.json()] == ["a"]
+    bad = await api.post("/api/results/a/feedback", json={"agreement": "maybe"}, headers=AUTH)
+    assert bad.status == 400
+    ok = await api.post("/api/results/a/feedback", json={"agreement": "right"}, headers=AUTH)
+    assert (await ok.json())["feedback"]["agreement"] == "right"
+    assert (await api.get("/api/results/zzz", headers=AUTH)).status == 404
+
+
+async def test_upload_video_calls_three_steps(api, store, tmp_path, monkeypatch):
+    video = tmp_path / "c1.mp4"
+    video.write_bytes(b"vid")
+    store.save_outcome(make_outcome(video=video))
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append((request.method, request.url.path))
+        if request.method == "GET":
+            return httpx.Response(
+                200, json={"uploadUrl": "https://r2.example/put", "publicUrl": "https://cdn/c1.mp4"}
+            )
+        return httpx.Response(200, json={"ok": True})
+
+    real_init = ShipwrightsClient.__init__
+
+    def init(self, **kw):
+        real_init(self, **{**kw, "transport": httpx.MockTransport(handler)})
+
+    monkeypatch.setattr(ShipwrightsClient, "__init__", init)
+
+    async def fake_put(upload_url, path):
+        calls.append(("PUT", upload_url))
+
+    monkeypatch.setattr(ShipwrightsClient, "_put_video", staticmethod(fake_put))
+    resp = await api.post("/api/results/c1/upload-video", headers=AUTH)
+    assert resp.status == 200, await resp.text()
+    assert calls == [
+        ("GET", "/api/v1/workplaces/stardance/certifications/c1/upload"),
+        ("PUT", "https://r2.example/put"),
+        ("POST", "/api/v1/workplaces/stardance/certifications/c1/upload"),
+    ]
+    assert store.get("c1").uploaded_video_url == "https://cdn/c1.mp4"
