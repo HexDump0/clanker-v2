@@ -28,3 +28,6 @@ Plain MV3 JavaScript, no build step. The same folder loads in both browsers.
   (free; `npx web-ext sign --channel=unlisted --api-key=… --api-secret=…` with keys from the AMO developer hub), then open the
   signed `.xpi`; (b) use Firefox Developer Edition/Nightly with `xpinstall.signatures.required=false`; (c) temporary
   loading from `about:debugging` (cleared on restart).
+- **Sidebar "Clanker" entry** (`nav.js`): clones an inactive sidebar link and appends it under "My Balance". Clicking it covers
+  the dashboard's main panel with the judgements page (an iframe of the extension page, `web_accessible_resources`). Another
+  sidebar link, a route change or Esc closes it.
