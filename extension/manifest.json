@@ -31,6 +31,7 @@
       ],
       "js": [
         "api.js",
+        "ui.js",
         "content.js"
       ],
       "run_at": "document_idle"
@@ -64,7 +65,12 @@
       "resources": [
         "judgements.html",
         "judgements.js",
-        "api.js"
+        "api.js",
+        "ui.js",
+        "ui.css",
+        "page.css",
+        "panel.css",
+        "fonts/*"
       ],
       "matches": [
         "https://ds.shipwrights.dev/*"

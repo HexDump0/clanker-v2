@@ -31,3 +31,9 @@ Plain MV3 JavaScript, no build step. The same folder loads in both browsers.
 - **Sidebar "Clanker" entry** (`nav.js`): clones an inactive sidebar link and appends it under "My Balance". Clicking it covers
   the dashboard's main panel with the judgements page (an iframe of the extension page, `web_accessible_resources`). Another
   sidebar link, a route change or Esc closes it.
+
+## Design
+Styled from the dashboard's own "graphite" theme tokens (`ui.css`), with Geist / Geist Mono / Space Grotesk bundled in
+`fonts/` for the extension page. `ui.js` holds the shared result view used by both the judgements page and the cert panel.
+Judgements page: master/detail triage with filters, search, keyboard shortcuts (`j`/`k` move, `r` right, `w` wrong),
+"Review a ship" (paste a link or ID) and a settings dialog that tests the API connection.

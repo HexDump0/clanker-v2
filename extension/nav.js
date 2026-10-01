@@ -48,8 +48,13 @@
     });
   }
 
+  // The cert-page button would sit on top of the embedded page; hide it while that is open.
+  const setPanelHidden = (hidden) =>
+    document.querySelectorAll("[data-clanker-panel]").forEach((el) => (el.style.display = hidden ? "none" : ""));
+
   function openOverlay() {
     if (!document.querySelector("main")) return;
+    setPanelHidden(true);
     overlay = document.createElement("div");
     overlay.dataset.clankerOverlay = "1";
     Object.assign(overlay.style, {
@@ -58,7 +63,7 @@
       borderRadius: "12px",
       overflow: "hidden",
       border: "1px solid rgba(255,255,255,.1)",
-      background: "#09090b",
+      background: "oklch(21% 0.006 286)",
     });
     const frame = document.createElement("iframe");
     frame.src = ext.runtime.getURL("judgements.html?embedded=1");
@@ -73,6 +78,7 @@
   }
 
   function closeOverlay() {
+    setPanelHidden(false);
     overlay?.remove();
     overlay = null;
     if (link) {

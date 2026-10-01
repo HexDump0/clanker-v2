@@ -181,3 +181,9 @@ async def test_error_responses_still_carry_cors_headers(api):
     )
     assert missing.status == 404
     assert missing.headers["Access-Control-Allow-Origin"] == "*"
+
+
+def test_reason_codes_get_human_labels(store):
+    store.save_outcome(make_outcome())
+    rec = store.get("c1")
+    assert rec.reasons == ["no_readme"] and rec.reason_labels == ["no README"]

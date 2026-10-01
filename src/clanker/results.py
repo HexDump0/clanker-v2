@@ -42,6 +42,7 @@ class ResultRecord(BaseModel):
     verdict: str  # REJECT | APPROVE | NEEDS_HUMAN (first layer) or the agent's verdict
     summary: str = ""
     reasons: list[str] = Field(default_factory=list)
+    reason_labels: list[str] = Field(default_factory=list)  # human text, parallel to `reasons`
     message: str | None = None  # copy-ready text for the shipper (REJECT)
     video_path: str | None = None
     pdf_path: str | None = None
@@ -58,6 +59,8 @@ def record_from_outcome(outcome: ReviewOutcome) -> ResultRecord:
         verdict = outcome.review.verdict.value
         summary = outcome.review.reasoning
         reasons = list(outcome.review.required_fixes or [])
+    from clanker.review.first_layer.reviewer import REASON_LABELS
+
     return ResultRecord(
         cert_id=outcome.cert_id,
         project_name=cert.project_name,
@@ -67,6 +70,7 @@ def record_from_outcome(outcome: ReviewOutcome) -> ResultRecord:
         verdict=verdict,
         summary=summary,
         reasons=reasons,
+        reason_labels=[REASON_LABELS.get(r, r) for r in reasons],
         message=outcome.reject_message,
         video_path=str(outcome.video_path) if outcome.video_path else None,
         pdf_path=str(outcome.pdf_path) if outcome.pdf_path else None,
