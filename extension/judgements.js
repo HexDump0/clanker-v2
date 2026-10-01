@@ -207,7 +207,17 @@
         await ClankerBridge.reject({ slug: SLUG, id: r.cert_id, comment, video }, (t) => (status.textContent = t));
         dashInfo.set(r.cert_id, { status: "REJECTED" });
         drafts.delete(r.cert_id);
-        d.close(); toast(`Rejected ${r.project_name} on the dashboard`, "ok"); render(true);
+        // Rejecting after Clanker also said reject is agreement: label it right (never overwrite an existing label).
+        let labelled = false;
+        if (norm(r.verdict) === "REJECT" && !r.feedback) {
+          try {
+            const saved = await ClankerApi.sendFeedback(r.cert_id, { agreement: "right", note: "", wrong_checks: [] });
+            const i = state.results.findIndex((x) => x.cert_id === r.cert_id);
+            if (i >= 0) state.results[i] = saved;
+            labelled = true;
+          } catch { /* the rejection itself already succeeded; the label is just a bonus */ }
+        }
+        d.close(); toast(`Rejected ${r.project_name}${labelled ? " and marked Clanker right" : ""}`, "ok"); render(true);
       } catch (e) {
         status.textContent = e.message; status.className = "hint note-bad"; go.disabled = cancel.disabled = false;
       }

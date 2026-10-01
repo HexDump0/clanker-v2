@@ -58,4 +58,6 @@ claim the ship if it isn't claimed, attach Clanker's video (optional checkbox), 
   server is never involved, so several reviewers can use it with their own accounts.
 - It's disabled when the ship is already approved/rejected, when another reviewer has it claimed, or when the Clanker page is opened from
   the toolbar icon instead of the dashboard sidebar (there's no dashboard session to use there).
+- After a successful reject, if Clanker's verdict was also **Reject**, the ship is labelled **Clanker was right** automatically (never over
+  an existing label; not done when Clanker said approve/needs human).
 - Ships marked "Clanker got it wrong" don't prefill Clanker's message. **Clanker was wrong / right** sit right below the Reject button.
