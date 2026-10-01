@@ -119,7 +119,7 @@
   // A ship a human marked "Clanker was wrong" shows as "manual review" everywhere, not as Clanker's verdict.
   const shown = (x) => {
     const rec = typeof x === "string" ? { verdict: x } : x;
-    return rec.manual_review ? { tone: "flag", label: "Manual review" } : verdictMeta(rec.verdict);
+    return rec.manual_review ? { tone: "flag", label: "Clanker got it wrong" } : verdictMeta(rec.verdict);
   };
   const badge = (x) => {
     const m = shown(x);
@@ -206,7 +206,7 @@
     out.info = h("div", { class: "pc" },
       kv("Ship", h("span", { title: rec.cert_id }, rec.cert_id.slice(0, 8))),
       kv("Verdict", statusText(rec)),
-      kv("Your label", fb ? (manual ? "wrong · manual review" : "right") : "—"),
+      kv("Feedback", fb ? (manual ? "Clanker got it wrong" : "right") : "—"),
       kv("Reviewed", new Date(rec.created_at).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })),
       kv("Reasons", String(pairs.length)));
 
@@ -217,7 +217,7 @@
     const picked = new Set();
     const note = h("textarea", { rows: "3", placeholder: pairs.length ? "Anything else? (optional)" : "What did Clanker get wrong?" });
     const wrongForm = h("div", { class: "stack", hidden: "", style: "margin-top:10px" },
-      h("div", { class: "hint" }, "This flags the ship for a human to review manually and posts to Slack."),
+      h("div", { class: "hint" }, "This takes the ship off the Clanker queue, marks it \"Clanker got it wrong\" and posts to Slack for a manual review."),
       pairs.length ? h("div", { class: "lbl" }, "Which reasons were wrong?") : null,
       pairs.map((p) => {
         const b = h("button", { class: "pick", type: "button", onclick: () => {
@@ -237,16 +237,16 @@
       wrongBtn.classList.toggle("on", fb?.agreement === "wrong");
       status.className = "hint " + (fb ? (fb.agreement === "right" ? "note-ok" : "") : "");
       if (fb?.agreement === "wrong") status.style.color = "#fb923c"; else status.style.color = "";
-      status.textContent = !fb ? "Right is just info for us. Wrong flags the ship for a manual review."
-        : fb.agreement === "right" ? "Marked right. Just info, nothing else changes."
-        : "Flagged for manual review. Slack was told; other reviewers see it here.";
+      status.textContent = !fb ? "Right is just feedback. Wrong takes it off the Clanker queue and flags it for a human."
+        : fb.agreement === "right" ? "Marked right. Just feedback; it stays in the queue."
+        : "Off the Clanker queue and marked as wrong. Slack was told; other reviewers see it here.";
       clearBtn.hidden = !fb;
     }
     async function send(agreement, text = "", wrong = []) {
       try {
         const saved = await api.sendFeedback(rec.cert_id, { agreement, note: text, wrong_checks: wrong });
         rec.feedback = saved.feedback; rec.manual_review = saved.manual_review; showSaved(rec.feedback); wrongForm.hidden = true;
-        toast(agreement === "wrong" ? "Flagged for manual review" : agreement === "clear" ? "Label cleared" : "Saved: Clanker was right", "ok");
+        toast(agreement === "wrong" ? "Marked wrong and taken off the queue" : agreement === "clear" ? "Label cleared" : "Saved: Clanker was right", "ok");
         opts.onChanged?.(saved);
       } catch (e) { toast(`Could not save: ${e.message}`, "bad"); }
     }

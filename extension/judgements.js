@@ -7,9 +7,9 @@
   const KEY = "clanker.page";
 
   const state = { results: [], loaded: false, error: null, view: "list", selected: null, cursor: null,
-    verdict: "", label: "todo", q: "", sort: "created", dir: -1 };
+    verdict: "", queue: "queue", q: "", sort: "created", dir: -1 };
   try { Object.assign(state, JSON.parse(sessionStorage.getItem(KEY) || "{}"), { view: "list" }); } catch {}
-  const save = () => { try { sessionStorage.setItem(KEY, JSON.stringify({ verdict: state.verdict, label: state.label, sort: state.sort, dir: state.dir })); } catch {} };
+  const save = () => { try { sessionStorage.setItem(KEY, JSON.stringify({ verdict: state.verdict, sort: state.sort, dir: state.dir })); } catch {} };
 
   const app = document.getElementById("app");
   const toast = toastFactory(document.body);
@@ -19,9 +19,8 @@
   // ---------- derived ----------
   const matches = (r) => {
     if (state.verdict && norm(r.verdict) !== state.verdict) return false;
-    if (state.label === "todo" && r.feedback) return false;
-    if (state.label === "right" && r.feedback?.agreement !== "right") return false;
-    if (state.label === "wrong" && r.feedback?.agreement !== "wrong") return false;
+    // The Clanker queue is everything except ships a human said Clanker got wrong.
+    if (state.queue === "queue" ? r.manual_review : !r.manual_review) return false;
     if (state.q) {
       const hay = [r.project_name, r.summary, ...reasonPairs(r).map((p) => p.label)].join(" ").toLowerCase();
       if (!hay.includes(state.q.toLowerCase())) return false;
@@ -35,24 +34,24 @@
     return (x < y ? -1 : x > y ? 1 : 0) * state.dir;
   });
   const count = (fn) => state.results.filter(fn).length;
+  const inQueue = (r) => !r.manual_review;
   const rec = () => state.results.find((r) => r.cert_id === state.selected);
 
   // ---------- top bar ----------
   function statBar() {
     const labelled = state.results.filter((r) => r.feedback);
     const right = labelled.filter((r) => r.feedback.agreement === "right").length;
-    const total = state.results.length;
-    const pct = (n) => (total ? `${Math.round((n / total) * 100)}%` : "");
+    const queue = state.results.filter(inQueue);
+    const pct = (n) => (queue.length ? `${Math.round((n / queue.length) * 100)}%` : "");
     const cell = (label, value, tone, extra, cls = "") => h("div", { class: `sb ${tone ? "c " + tone : ""} ${cls}` },
       h("span", { class: "lbl" }, label), h("span", { class: "v" }, String(value), extra && h("span", { class: "pct" }, extra)));
-    const rejects = count((r) => norm(r.verdict) === "REJECT"), approves = count((r) => norm(r.verdict) === "APPROVE");
+    const of = (v) => queue.filter((r) => norm(r.verdict) === v).length;
     return h("div", { class: "statbar" },
-      cell("To review", count((r) => !r.feedback), null, null, "hero"),
-      cell("Judged", total),
-      cell("Rejects", rejects, "bad", pct(rejects)),
-      cell("Approves", approves, "ok", pct(approves)),
-      cell("Needs human", count((r) => norm(r.verdict) === "NEEDS_HUMAN"), "warn"),
-      cell("Manual review", count((r) => r.manual_review), "flag"),
+      cell("In queue", queue.length, null, null, "hero"),
+      cell("Rejects", of("REJECT"), "bad", pct(of("REJECT"))),
+      cell("Approves", of("APPROVE"), "ok", pct(of("APPROVE"))),
+      cell("Needs human", of("NEEDS_HUMAN"), "warn"),
+      cell("Got it wrong", count((r) => r.manual_review), "flag"),
       cell("Agreement", labelled.length ? `${Math.round((right / labelled.length) * 100)}%` : "–", null, labelled.length ? `${labelled.length} labelled` : ""));
   }
 
@@ -72,15 +71,21 @@
   }
 
   function filters() {
-    const v = (value, name, tone) => filterBtn(name, value ? count((r) => norm(r.verdict) === value) : state.results.length, state.verdict, value, tone, (x) => { state.verdict = x; save(); render(); });
-    const l = (value, name, n, tone) => filterBtn(name, n, state.label, value, tone, (x) => { state.label = x; save(); render(); });
+    const queue = state.results.filter(inQueue);
+    const v = (value, name, tone) => {
+      const n = value ? queue.filter((r) => norm(r.verdict) === value).length : queue.length;
+      const on = state.queue === "queue" && state.verdict === value;
+      return h("button", { class: `fbtn ${tone || ""} ${on ? "on" : ""}`, onclick: () => { state.queue = "queue"; state.verdict = value; save(); render(); } },
+        tone && h("span", { class: `dot ${tone}` }), name, h("span", { class: "n" }, String(n)));
+    };
+    const wrong = count((r) => r.manual_review);
     const search = h("input", { type: "search", placeholder: "Search ships and reasons…", value: state.q, "aria-label": "Search" });
     search.addEventListener("input", () => { state.q = search.value; renderTable(); });
     return h("div", { class: "filters" },
-      h("div", { class: "frow" }, v("", "All"), v("REJECT", "Reject", "bad"), v("APPROVE", "Approve", "ok"), v("NEEDS_HUMAN", "Needs human", "warn")),
-      h("div", { class: "frow" },
-        l("todo", "To review", count((r) => !r.feedback), "accent"), l("wrong", "Manual review", count((r) => r.manual_review), "flag"),
-        l("right", "Marked right", count((r) => r.feedback?.agreement === "right"), "ok"), l("all", "Everything", state.results.length),
+      h("div", { class: "frow" }, v("", "Clanker queue"), v("REJECT", "Reject", "bad"), v("APPROVE", "Approve", "ok"), v("NEEDS_HUMAN", "Needs human", "warn"),
+        h("button", { class: `fbtn flag ${state.queue === "wrong" ? "on" : ""}`, title: "Ships a human marked wrong. They are off the Clanker queue.",
+          onclick: () => { state.queue = state.queue === "wrong" ? "queue" : "wrong"; render(); } },
+          h("span", { class: "dot flag" }), "Clanker got it wrong", h("span", { class: "n" }, String(wrong))),
         h("div", { class: "search" }, search)));
   }
 
@@ -95,7 +100,7 @@
     const why = pairs.length ? pairs[0].label + (pairs.length > 1 ? `, +${pairs.length - 1} more` : "") : (r.summary || "").split(". ")[0];
     const lab = r.feedback
       ? h("span", { class: r.feedback.agreement === "right" ? "note-ok" : "flag", style: r.feedback.agreement === "right" ? "" : "color:var(--c)" },
-          r.feedback.agreement === "right" ? "✓ right" : "⚑ manual")
+          r.feedback.agreement === "right" ? "✓ right" : "✗ wrong")
       : "—";
     return h("button", { class: "tr" + (r.cert_id === state.cursor ? " cur" : ""), "data-id": r.cert_id, onclick: () => open(r.cert_id) },
       h("span", { class: "td-name" }, r.project_name), statusText(r),
@@ -109,7 +114,7 @@
 
   function tableBox() {
     const box = h("div", { class: "table", id: "tablebox" });
-    box.append(h("div", { class: "tr head" }, th("Project", "project"), th("Verdict", "verdict"), h("span", { class: "lbl" }, "Reason"), h("span", { class: "lbl" }, "Label"), th("Reviewed", "created")));
+    box.append(h("div", { class: "tr head" }, th("Project", "project"), th("Verdict", "verdict"), h("span", { class: "lbl" }, "Reason"), h("span", { class: "lbl" }, "Feedback"), th("Reviewed", "created")));
     if (!state.loaded) { box.append(...Array.from({ length: 7 }, () => h("div", { class: "skel" }))); return box; }
     if (state.error) {
       box.append(emptyBox("Can't reach the Clanker API", state.error,
@@ -122,7 +127,7 @@
       return box;
     }
     const items = visible();
-    if (!items.length) { box.append(emptyBox(state.label === "todo" && !state.q ? "All caught up" : "No matches", "Nothing left in this view.")); return box; }
+    if (!items.length) { box.append(emptyBox(state.queue === "wrong" ? "Nothing here" : state.q || state.verdict ? "No matches" : "The queue is empty", state.queue === "wrong" ? "No ships are marked as wrong." : "Nothing in this view.")); return box; }
     if (!items.some((r) => r.cert_id === state.cursor)) state.cursor = items[0].cert_id;
     box.append(...items.map(row), h("div", { class: "pager" }, h("span", {}, `${items.length} of ${state.results.length} ships`), h("span", {}, "j / k to move · Enter to open")));
     return box;
@@ -226,7 +231,7 @@
       try {
         const done = await ClankerApi.runReview(id, (t) => (status.textContent = t));
         if (done.state === "failed") throw new Error(done.error || "review failed");
-        d.close(); state.verdict = ""; state.label = "all"; state.q = "";
+        d.close(); state.verdict = ""; state.queue = "queue"; state.q = "";
         await load(); open(id); toast("Review ready", "ok");
       } catch (e) { status.textContent = e.message; status.className = "hint note-bad"; go.disabled = input.disabled = false; }
     };
