@@ -111,9 +111,7 @@ class _Plan:
         bend = self.rng.uniform(0.04, 0.16) * dist * self.rng.choice((-1, 1))
         c1 = (self.x + dx * 0.3 + nx * bend, self.y + dy * 0.3 + ny * bend)
         c2 = (self.x + dx * 0.78 + nx * bend * 0.35, self.y + dy * 0.78 + ny * bend * 0.35)
-        self.moves.append(
-            {"t0": self.t, "t1": self.t + dur, "p": [self.x, self.y, *c1, *c2, x, y]}
-        )
+        self.moves.append({"t0": self.t, "t1": self.t + dur, "p": [self.x, self.y, *c1, *c2, x, y]})
         self.t += dur
         self.x, self.y = x, y
 
@@ -223,7 +221,8 @@ def build_browser_composition(
                 "h": height,
                 "url": _display_url(url) if url else "",
                 "title": (
-                    capture.page_title or (_display_url(url).split("/")[0] if url else "")
+                    capture.page_title
+                    or (_display_url(url).split("/")[0] if url else "")
                     or scene.directed.title
                 )[:60],
                 "load": load,

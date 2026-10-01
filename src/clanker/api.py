@@ -1,15 +1,19 @@
 """Local HTTP API for the Clanker browser extension.
 
-Binds to 127.0.0.1 only and requires ``Authorization: Bearer <EXTENSION_API_TOKEN>``.
-It is read-only apart from two human-triggered actions: saving "Clanker was right/wrong"
+Auth is the caller's own Dashboard session token (``Authorization: Bearer <token>``). It is
+only *validated*: one read-only workplace request proves it is a live session with Dashboard
+access. It is cached (hashed) for a few minutes and never stored or used for anything else.
+The API is read-only apart from two human-triggered actions: saving "Clanker was right/wrong"
 feedback, and uploading a result's video to the cert (the extension's "Use video" button).
 It never submits a review verdict; a human does that in the dashboard.
 """
 
 from __future__ import annotations
 
-import hmac
+import hashlib
 import logging
+import time
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from aiohttp import web
@@ -17,12 +21,50 @@ from aiohttp import web
 from clanker.config import Settings
 from clanker.results import ResultStore
 from clanker.shipwrights import ShipwrightsClient
-from clanker.shipwrights.client import ShipwrightsError
+from clanker.shipwrights.client import AuthenticationError, ShipwrightsError
+
+TokenValidator = Callable[[str], Awaitable[bool]]
+VALID_TTL = 300.0
 
 logger = logging.getLogger(__name__)
 
 STORE = web.AppKey("store", ResultStore)
 SETTINGS = web.AppKey("settings", Settings)
+VALIDATOR = web.AppKey("validator", Callable)
+AUTH_CACHE = web.AppKey("auth_cache", dict)
+
+
+def dashboard_validator(settings: Settings) -> TokenValidator:
+    """Check a token against the real Dashboard (read-only) without keeping it."""
+
+    async def validate(token: str) -> bool:
+        try:
+            async with ShipwrightsClient(
+                base_url=settings.shipwrights_base_url,
+                session_cookie=token,
+                workplace=settings.shipwrights_workplace,
+            ) as sw:
+                await sw.get_workplace()
+            return True
+        except AuthenticationError:
+            return False
+        except ShipwrightsError:
+            logger.warning("Dashboard error while validating a token", exc_info=True)
+            return False
+
+    return validate
+
+
+async def _is_valid(app: web.Application, token: str) -> bool:
+    key = hashlib.sha256(token.encode()).hexdigest()
+    cache: dict[str, float] = app[AUTH_CACHE]
+    if cache.get(key, 0.0) > time.monotonic():
+        return True
+    if not await app[VALIDATOR](token):
+        cache.pop(key, None)
+        return False
+    cache[key] = time.monotonic() + VALID_TTL
+    return True
 
 
 @web.middleware
@@ -34,11 +76,10 @@ async def _auth_and_cors(request: web.Request, handler: Any) -> web.StreamRespon
     }
     if request.method == "OPTIONS":
         return web.Response(headers=cors)
-    token = request.app[SETTINGS].extension_api_token
     supplied = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
     # The video is played in a <video> tag, which cannot send headers; allow ?token= there.
     supplied = supplied or request.query.get("token", "")
-    if not token or not hmac.compare_digest(supplied, token):
+    if not supplied or not await _is_valid(request.app, supplied):
         return web.json_response({"error": "unauthorized"}, status=401, headers=cors)
     response = await handler(request)
     response.headers.update(cors)
@@ -113,10 +154,14 @@ async def post_upload_video(request: web.Request) -> web.Response:
     return web.json_response({"url": url})
 
 
-def build_api(settings: Settings, store: ResultStore) -> web.Application:
+def build_api(
+    settings: Settings, store: ResultStore, validator: TokenValidator | None = None
+) -> web.Application:
     app = web.Application(middlewares=[_auth_and_cors])
     app[STORE] = store
     app[SETTINGS] = settings
+    app[VALIDATOR] = validator or dashboard_validator(settings)
+    app[AUTH_CACHE] = {}
     app.router.add_get("/api/results", list_results)
     app.router.add_get("/api/feedback.jsonl", get_feedback_export)
     app.router.add_get("/api/results/{cert_id}", get_result)
@@ -131,8 +176,10 @@ async def run_extension_api(settings: Settings, store: ResultStore) -> None:
 
     runner = web.AppRunner(build_api(settings, store))
     await runner.setup()
-    await web.TCPSite(runner, "127.0.0.1", settings.extension_api_port).start()
-    logger.info("Extension API on http://127.0.0.1:%d", settings.extension_api_port)
+    await web.TCPSite(runner, settings.extension_api_host, settings.extension_api_port).start()
+    logger.info(
+        "Extension API on http://%s:%d", settings.extension_api_host, settings.extension_api_port
+    )
     try:
         await asyncio.Event().wait()
     finally:

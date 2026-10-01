@@ -76,9 +76,7 @@ def seconds_until_utc_time(hour: int, minute: int, now: datetime | None = None) 
     return (target - now).total_seconds()
 
 
-async def _count_pending_older_than(
-    client: ShipwrightsClient, cutoff: datetime
-) -> int:
+async def _count_pending_older_than(client: ShipwrightsClient, cutoff: datetime) -> int:
     """Count pending certs older than ``cutoff`` by walking date:asc pages.
 
     The list is sorted oldest-first, so the walk stops at the first cert newer
@@ -106,9 +104,7 @@ async def _count_pending_older_than(
 
 async def gather_daily_stats(client: ShipwrightsClient) -> DailyStats:
     """One read-only pass over the Dashboard for the daily numbers."""
-    page1 = await client.list_certifications(
-        status=CertStatus.PENDING, page=1, sort="date:asc"
-    )
+    page1 = await client.list_certifications(status=CertStatus.PENDING, page=1, sort="date:asc")
     era5 = await _count_pending_older_than(client, datetime.now(UTC) - FIVE_DAYS)
     leaderboard = await client.get_leaderboard("daily")
     return DailyStats(

@@ -57,8 +57,7 @@ def _guard_private_context(review: ReviewOutput, private_values: list[str]) -> N
         normalized = re.sub(r"\s+", " ", value).strip().lower()
         candidates = [normalized]
         candidates.extend(
-            re.sub(r"\s+", " ", part).strip().lower()
-            for part in re.split(r"[\n.!?]+", value)
+            re.sub(r"\s+", " ", part).strip().lower() for part in re.split(r"[\n.!?]+", value)
         )
         leaked = next((part for part in candidates if len(part) >= 24 and part in public), None)
         if leaked:

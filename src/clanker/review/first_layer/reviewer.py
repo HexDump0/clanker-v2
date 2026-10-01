@@ -281,9 +281,10 @@ def _unsure_reasons(
     for key, (limit, text) in CONTEXT_FLAGS.items():
         if (answers.get(key) or {}).get("noul", 0) >= limit:
             out.append(f"{text} ({answers[key]['noul']:.2f})")
-    if facts.get("previously_rejected") and (answers.get("feedback_ignored") or {}).get(
-        "noul", 0
-    ) >= 0.7:
+    if (
+        facts.get("previously_rejected")
+        and (answers.get("feedback_ignored") or {}).get("noul", 0) >= 0.7
+    ):
         out.append("the last rejection's feedback may not be addressed")
     ptype = answers.get("project_type") or {}
     if ptype.get("confidence", 1) < 0.5:

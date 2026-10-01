@@ -268,8 +268,7 @@ class StardanceAdminClient:
             if "shipwrights" in urlparse(location).netloc:
                 return location
             raise StardanceAdminError(
-                f"ship page redirected to {location or '?'} — session cookie "
-                "likely expired",
+                f"ship page redirected to {location or '?'} — session cookie likely expired",
             )
         if response.status_code >= 400:
             raise StardanceAdminError(

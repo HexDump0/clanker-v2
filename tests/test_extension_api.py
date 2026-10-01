@@ -14,6 +14,12 @@ from clanker.shipwrights import ShipwrightsClient
 
 TOKEN = "t0ken"
 AUTH = {"Authorization": f"Bearer {TOKEN}"}
+VALIDATIONS: list[str] = []
+
+
+async def fake_validator(token: str) -> bool:
+    VALIDATIONS.append(token)
+    return token == TOKEN
 
 
 def make_outcome(cert_id="c1", verdict="REJECT", video=None):
@@ -38,8 +44,9 @@ def store(tmp_path):
 
 @pytest.fixture
 async def api(store, tmp_path):
-    settings = Settings(extension_api_token=TOKEN, shipwrights_session="x")
-    async with TestClient(TestServer(build_api(settings, store))) as c:
+    VALIDATIONS.clear()
+    settings = Settings(shipwrights_session="x")
+    async with TestClient(TestServer(build_api(settings, store, fake_validator))) as c:
         yield c
 
 
@@ -107,3 +114,33 @@ async def test_upload_video_calls_three_steps(api, store, tmp_path, monkeypatch)
         ("POST", "/api/v1/workplaces/stardance/certifications/c1/upload"),
     ]
     assert store.get("c1").uploaded_video_url == "https://cdn/c1.mp4"
+
+
+async def test_valid_token_is_cached_but_bad_one_is_rechecked(api):
+    for _ in range(3):
+        assert (await api.get("/api/results", headers=AUTH)).status == 200
+    assert VALIDATIONS == [TOKEN]
+    bad = {"Authorization": "Bearer nope"}
+    await api.get("/api/results", headers=bad)
+    await api.get("/api/results", headers=bad)
+    assert VALIDATIONS.count("nope") == 2
+    assert (await api.get(f"/api/results?token={TOKEN}")).status == 200
+
+
+async def test_dashboard_validator_accepts_live_session_and_rejects_401(monkeypatch):
+    from clanker.api import dashboard_validator
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.headers.get("cookie") == "session=good":
+            return httpx.Response(200, json={"slug": "stardance"})
+        return httpx.Response(401, json={"error": "no"})
+
+    real_init = ShipwrightsClient.__init__
+    monkeypatch.setattr(
+        ShipwrightsClient,
+        "__init__",
+        lambda self, **kw: real_init(self, **{**kw, "transport": httpx.MockTransport(handler)}),
+    )
+    validate = dashboard_validator(Settings(shipwrights_session="x"))
+    assert await validate("good") is True
+    assert await validate("bad") is False

@@ -133,8 +133,10 @@ def _code_checks(result: FirstLayerResult, packet: ReviewPacket) -> list[dict[st
         row("README language", "fail" if lang else "pass", f"Looks {lang}" if lang else "English")
     if facts.get("commit_history"):
         pre = "pre_event_undeclared" in result.reasons
-        declared = "declared as an update" if facts.get("declared_as_updated_project") else (
-            "not declared as an update"
+        declared = (
+            "declared as an update"
+            if facts.get("declared_as_updated_project")
+            else ("not declared as an update")
         )
         row("Project history", "fail" if pre else "info", f"{_history_text(facts)}; {declared}")
     bad = facts.get("demo_url_rejected_platforms") or []

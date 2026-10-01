@@ -30,8 +30,7 @@ OTHER = {
     "progetto puoi usare",
     "indonesian": "dan yang di ini itu dengan untuk dari ke tidak ada akan bisa pada juga "
     "atau saya kamu proyek cara menggunakan",
-    "turkish": "ve bir bu da de ile için çok olan gibi daha ama ne kadar proje nasıl "
-    "kullanmak",
+    "turkish": "ve bir bu da de ile için çok olan gibi daha ama ne kadar proje nasıl kullanmak",
     "dutch": "de het een en van is dat op te in met voor niet zijn je ook als maar project",
     "vietnamese": "và của là có không được một các cho này những với trong để người dự án",
     "polish": "i w na z że do się nie to jest jak co ale o po projekt",

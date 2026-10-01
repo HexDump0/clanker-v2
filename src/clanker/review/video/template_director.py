@@ -138,8 +138,7 @@ def plan_scenes(reasons: Sequence[str], inputs: RejectVideoInputs, seed: str) ->
                 "made it.",
                 "needs_api_key": "Reviewers can't bring their own key. Include a working key or "
                 "proxy (Hack Club AI is a free option).",
-                "readme_not_english": "Write it in English, or link an English version at the "
-                "top.",
+                "readme_not_english": "Write it in English, or link an English version at the top.",
             }[reason]
             # AI README: no highlight, for the same reason as AI code (the whole README is the
             # problem, not a line). Thin README: the heading shows how little is there.
@@ -334,8 +333,7 @@ FALLBACK_CARDS: dict[str, tuple[str, str, str]] = {
     ),
     "pre_event_undeclared": (
         "Started before Stardance",
-        "This repo has work from before June 1st. Mark the project as an update when you "
-        "reship.",
+        "This repo has work from before June 1st. Mark the project as an update when you reship.",
         "Mark it as an updated project",
     ),
     "readme_not_english": (
@@ -350,8 +348,7 @@ FALLBACK_CARDS: dict[str, tuple[str, str, str]] = {
     ),
     "readme_not_raw": (
         "The README link isn't raw",
-        "Stardance needs the raw file so it can render it. Swap the link in your project "
-        "settings.",
+        "Stardance needs the raw file so it can render it. Swap the link in your project settings.",
         "Set the README link to the raw file",
     ),
     "bad_hosting": (

@@ -127,9 +127,7 @@ class ReviewPacket:
             ):
                 when = attempt.created_at.date().isoformat() if attempt.created_at else "?"
                 current = " · current attempt" if attempt.id == c.id else ""
-                lines.append(
-                    f"- Attempt {attempt.id} · {when} · {attempt.status.value}{current}"
-                )
+                lines.append(f"- Attempt {attempt.id} · {when} · {attempt.status.value}{current}")
                 if attempt.return_reason:
                     lines.append(f"  - Return reason: {attempt.return_reason}")
                 for review in sorted(attempt.reviews, key=lambda r: r.created_at):
@@ -248,9 +246,7 @@ class ReviewPacket:
             lines.append(f"Source: {self.readme_source}")
         if self.readme_data:
             fetched_at = (
-                self.readme_data.fetched_at.isoformat()
-                if self.readme_data.fetched_at
-                else "?"
+                self.readme_data.fetched_at.isoformat() if self.readme_data.fetched_at else "?"
             )
             lines.append(
                 f"Cache status: {self.readme_data.status or '?'} · "
@@ -346,16 +342,22 @@ async def build_packet(
         # Keep non-ok payloads: redirected_away is a review signal, not a fetch bug.
         return await _tool_payload(tools.fetch_stardance_project(url))
 
-    github, readme_data, feedback_templates, tree, languages, stardance, demo_render = (
-        await asyncio.gather(
-            get_github(),
-            get_readme(),
-            get_feedback_templates(),
-            get_tree(),
-            get_languages(),
-            get_stardance(),
-            get_demo_render(),
-        )
+    (
+        github,
+        readme_data,
+        feedback_templates,
+        tree,
+        languages,
+        stardance,
+        demo_render,
+    ) = await asyncio.gather(
+        get_github(),
+        get_readme(),
+        get_feedback_templates(),
+        get_tree(),
+        get_languages(),
+        get_stardance(),
+        get_demo_render(),
     )
 
     readme = readme_data.markdown if readme_data else ""
@@ -364,9 +366,7 @@ async def build_packet(
     repo = parse_repo(cert.repo_url)
     if not readme and repo is not None and repo.kind != "github":
         try:
-            async with httpx.AsyncClient(
-                timeout=15, headers={"User-Agent": "clanker/0.1"}
-            ) as web:
+            async with httpx.AsyncClient(timeout=15, headers={"User-Agent": "clanker/0.1"}) as web:
                 fetched = await fetch_readme(cert.repo_url, cert.readme_url, web)
             if fetched:
                 readme, readme_source = fetched

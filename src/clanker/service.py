@@ -195,9 +195,7 @@ async def run_slack_service(ctx: AppContext) -> None:
             }
         )
 
-    memory = MemoryStore(
-        settings.chat_memory_file, max_entries=settings.chat_memory_max_entries
-    )
+    memory = MemoryStore(settings.chat_memory_file, max_entries=settings.chat_memory_max_entries)
 
     async def remember(key: str, fact: str) -> str:
         """Save one important, durable fact to long-term memory.
@@ -296,7 +294,7 @@ async def run_all(settings: Settings) -> None:
         async with asyncio.TaskGroup() as tg:
             tg.create_task(_supervise("watcher", run_watcher_service, ctx), name="watcher")
             tg.create_task(_supervise("slack", run_slack_service, ctx), name="slack")
-            if settings.extension_api_token:
+            if settings.extension_api_enabled:
                 from clanker.api import run_extension_api
                 from clanker.results import ResultStore
 

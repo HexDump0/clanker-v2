@@ -251,9 +251,7 @@ class StardancePendingSource:
                 dash_cert_id = None
 
             if dash_cert_id is None:
-                logger.error(
-                    "Stardance ship %s not imported by Dashboard — review skipped", key
-                )
+                logger.error("Stardance ship %s not imported by Dashboard — review skipped", key)
                 if self._announcer is not None:
                     view = ship or AdminShip(ship_id=key, title=key, author="", status="pending")
                     await self._announcer.announce_dash_down(
@@ -314,8 +312,10 @@ class Watcher:
         # Seen-ids are source-namespaced (Dashboard cert ids vs Stardance ship
         # ids); switching sources restarts the watch without emitting a flood.
         self._first_run = loaded is None or loaded.source != source.name
-        self._state = loaded if loaded is not None and not self._first_run else WatcherState(
-            source=source.name
+        self._state = (
+            loaded
+            if loaded is not None and not self._first_run
+            else WatcherState(source=source.name)
         )
         self._state.source = source.name
         self._last_fingerprint: tuple[int, frozenset[str]] | None = None
@@ -346,9 +346,7 @@ class Watcher:
         self._polls_since_walk = 0
 
         fresh_keys = list(
-            dict.fromkeys(
-                item.key for item in items if item.key not in self._state.seen_ids
-            )
+            dict.fromkeys(item.key for item in items if item.key not in self._state.seen_ids)
         )
         self._state.seen_ids.update(item.key for item in items)
         self._state.last_poll_at = datetime.now(UTC).isoformat()

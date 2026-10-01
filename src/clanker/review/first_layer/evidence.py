@@ -301,9 +301,7 @@ async def _github_history(
     as the owner's (most beginners haven't linked their git email).
     """
     total = await gh.get(f"{base}/commits", params={"sha": sha, "per_page": 1})
-    pre = await gh.get(
-        f"{base}/commits", params={"sha": sha, "until": CUTOFF_ISO, "per_page": 100}
-    )
+    pre = await gh.get(f"{base}/commits", params={"sha": sha, "until": CUTOFF_ISO, "per_page": 100})
     if total.status_code != 200 or pre.status_code != 200:
         return None
     commits = pre.json()

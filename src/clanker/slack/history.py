@@ -114,9 +114,7 @@ async def fetch_thread_history(
     Returns an empty list on any failure; the caller falls back to its cache.
     """
     try:
-        resp = await client.conversations_replies(
-            channel=channel_id, ts=thread_ts, limit=limit
-        )
+        resp = await client.conversations_replies(channel=channel_id, ts=thread_ts, limit=limit)
     except Exception:
         logger.info("Could not fetch thread replies; falling back to cached history")
         return []

@@ -236,9 +236,7 @@ class Announcer:
             look = ["*Some projects you need to look at:*"]
             for cert in stats.oldest:
                 ptype = cert.ai_type or cert.project_type or "?"
-                look.append(
-                    f"• <{self._cert_link(cert.id)}|{cert.project_name}> ({ptype})"
-                )
+                look.append(f"• <{self._cert_link(cert.id)}|{cert.project_name}> ({ptype})")
             blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "\n".join(look)}})
         else:
             blocks.append(
@@ -366,9 +364,7 @@ class Announcer:
             "fallback": f"New ship: {ship.title or ship.ship_id} ({ptype})",
         }
 
-    async def announce_ship_from_stardance(
-        self, ship: AdminShip, *, ship_url: str
-    ) -> str:
+    async def announce_ship_from_stardance(self, ship: AdminShip, *, ship_url: str) -> str:
         """Announce a ship the instant Stardance shows it, pre-reconciliation.
 
         Same two-message structure as ``announce_ship``; returns the embed ts

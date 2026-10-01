@@ -98,9 +98,7 @@ def create_slack_app(settings: Settings, chat_agent: Agent) -> AsyncApp:
         # Store key still needs team for ConversationStore compatibility
         store_key = (team_id, channel_id, thread_ts)
         try:
-            resp = await client.conversations_replies(
-                channel=channel_id, ts=thread_ts, limit=100
-            )
+            resp = await client.conversations_replies(channel=channel_id, ts=thread_ts, limit=100)
             from pydantic_ai.messages import (
                 ModelMessage,
                 ModelRequest,

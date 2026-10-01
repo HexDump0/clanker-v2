@@ -111,10 +111,13 @@ def build_composition(
         cursor += SCENE_SECONDS
     timeline.append({"selector": ".outro", "start": cursor, "end": cursor + OUTRO_SECONDS})
     total = cursor + OUTRO_SECONDS
-    fixes = "".join(
-        f"<li><span>{index:02d}</span>{html.escape(fix)}</li>"
-        for index, fix in enumerate(project.required_fixes, 1)
-    ) or "<li><span>01</span>Review the evidence above before resubmitting.</li>"
+    fixes = (
+        "".join(
+            f"<li><span>{index:02d}</span>{html.escape(fix)}</li>"
+            for index, fix in enumerate(project.required_fixes, 1)
+        )
+        or "<li><span>01</span>Review the evidence above before resubmitting.</li>"
+    )
 
     document = f"""<!doctype html><html><head><meta charset="utf-8"><style>
 * {{ box-sizing: border-box; }}
@@ -169,15 +172,32 @@ def _ffmpeg_args(webm: Path, duration: float, output_path: Path, music: Path | N
     args = ["ffmpeg", "-y", "-v", "error", "-i", str(webm)]
     if music:
         args += ["-stream_loop", "-1", "-i", str(music)]
-    args += ["-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p", "-r", "30"]
+    args += [
+        "-c:v",
+        "libx264",
+        "-preset",
+        "medium",
+        "-crf",
+        "20",
+        "-pix_fmt",
+        "yuv420p",
+        "-r",
+        "30",
+    ]
     if music:
         fade_out_start = max(0.0, duration - 2.5)
         args += [
             "-filter_complex",
-            f"[1:a]volume=0.7,afade=t=in:st=0:d=1.5,"
-            f"afade=t=out:st={fade_out_start:.3f}:d=2.5[a]",
-            "-map", "0:v", "-map", "[a]",
-            "-c:a", "aac", "-b:a", "128k", "-shortest",
+            f"[1:a]volume=0.7,afade=t=in:st=0:d=1.5,afade=t=out:st={fade_out_start:.3f}:d=2.5[a]",
+            "-map",
+            "0:v",
+            "-map",
+            "[a]",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "128k",
+            "-shortest",
         ]
     else:
         args += ["-an"]
@@ -225,7 +245,8 @@ async def render_composition(
 
         process = await asyncio.create_subprocess_exec(
             *_ffmpeg_args(webm, duration, output_path, music),
-            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
         )
         try:
             _, stderr = await asyncio.wait_for(process.communicate(), timeout=ENCODE_TIMEOUT)

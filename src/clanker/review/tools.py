@@ -59,10 +59,7 @@ def _platform_flags(*urls: str) -> list[str]:
     """Return stable, de-duplicated policy flags for requested/final URLs."""
     return list(
         dict.fromkeys(
-            flag
-            for url in urls
-            for marker, flag in _URL_FLAGS.items()
-            if marker in url.lower()
+            flag for url in urls for marker, flag in _URL_FLAGS.items() if marker in url.lower()
         )
     )
 
@@ -73,9 +70,7 @@ def _ok(data: Any) -> str:
 
 
 def _err(reason: str, *, category: str = "tool_error", **details: Any) -> str:
-    return json.dumps(
-        {"ok": False, "error_category": category, "error": reason, **details}
-    )
+    return json.dumps({"ok": False, "error_category": category, "error": reason, **details})
 
 
 def _parse_github_url(url: str) -> tuple[str, str] | None:
@@ -236,9 +231,8 @@ class _StardanceParser(HTMLParser):
         if self._devlog is not None:
             if tag == "time" and data.get("datetime") and not self._devlog["created_at"]:
                 self._devlog["created_at"] = data["datetime"]
-            if (
-                tag in {"img", "video"}
-                and classes.intersection({"feed-post-card__image", "feed-post-card__video"})
+            if tag in {"img", "video"} and classes.intersection(
+                {"feed-post-card__image", "feed-post-card__video"}
             ):
                 media_url = data.get("src")
                 if media_url:
@@ -347,9 +341,7 @@ def _extract_stardance_project(markup: str, *, max_devlogs: int = 50) -> dict[st
         "description": meta.get("description"),
         "image": meta.get("image"),
         "banner_url": parser.banner_url,
-        "banner_is_default": (
-            "default-banner" in parser.banner_url if parser.banner_url else None
-        ),
+        "banner_is_default": ("default-banner" in parser.banner_url if parser.banner_url else None),
         "devlog_count": total,
         "total_hours": _as_number(parser.stats.get("total hours")),
     }
@@ -697,9 +689,7 @@ class ReviewTools:
             return _err(f"Could not parse GitHub URL: {repo_url}")
         owner, repo = parsed
         try:
-            r = await self._github.get(
-                f"/repos/{owner}/{repo}/releases", params={"per_page": 10}
-            )
+            r = await self._github.get(f"/repos/{owner}/{repo}/releases", params={"per_page": 10})
             if r.status_code != 200:
                 return _err(f"GitHub API returned status {r.status_code}")
             releases = []
@@ -740,9 +730,7 @@ class ReviewTools:
             return _err(f"Could not parse GitHub URL: {repo_url}")
         owner, repo = parsed
         try:
-            r = await self._github.get(
-                "/search/code", params={"q": f"{query} repo:{owner}/{repo}"}
-            )
+            r = await self._github.get("/search/code", params={"q": f"{query} repo:{owner}/{repo}"})
             if r.status_code in (401, 403):
                 return _err(
                     f"GitHub search API returned {r.status_code} (auth required or rate "

@@ -92,8 +92,7 @@ def resolve_highlight(capture: EvidenceCapture, requested_text: str | None) -> T
     box = leaves[0].box
     viewport_area = capture.viewport_width * capture.viewport_height
     if box.area > viewport_area * 0.55 or (
-        box.width > capture.viewport_width * 0.96
-        and box.height > capture.viewport_height * 0.45
+        box.width > capture.viewport_width * 0.96 and box.height > capture.viewport_height * 0.45
     ):
         return TargetResult(None, HighlightResolution.UNSAFE, "matched element is too large")
     return TargetResult(box, HighlightResolution.RESOLVED, f"unique {match_kind} match")

@@ -215,9 +215,7 @@ async def generate_review_video(
         raise VideoPipelineError("review supplied no browser-visible video evidence")
     run_dir = work_dir
     run_dir.mkdir(parents=True, exist_ok=True)
-    captures, failures, audit = await _capture_all(
-        evidence, run_dir / "captures", capture_policy
-    )
+    captures, failures, audit = await _capture_all(evidence, run_dir / "captures", capture_policy)
     if not captures:
         raise VideoPipelineError(f"all evidence captures failed: {failures}")
 

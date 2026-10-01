@@ -173,8 +173,7 @@ async def run_agent_streaming(
                     tool_name = getattr(result_part, "tool_name", None) or "tool"
                     call_id = result_part.tool_call_id or f"tool_{tool_id_counter}"
                     succeeded = (
-                        isinstance(result_part, ToolReturnPart)
-                        and result_part.outcome == "success"
+                        isinstance(result_part, ToolReturnPart) and result_part.outcome == "success"
                     )
                     await safe_append(
                         chunks=[

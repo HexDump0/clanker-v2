@@ -144,9 +144,7 @@ class Settings(BaseSettings):
     )
     video_director_model_name: str = Field(
         default="qwen/qwen3-vl-8b-thinking",
-        description=(
-            "Separate vision model used once to select and write review-video scenes."
-        ),
+        description=("Separate vision model used once to select and write review-video scenes."),
     )
     video_director_provider_only: str = Field(
         default="",
@@ -196,10 +194,11 @@ class Settings(BaseSettings):
     pdf_dir: Path = Path("data/pdfs")
     results_dir: Path = Path("data/results")
 
-    # Browser-extension API (local only; off unless a token is set)
-    extension_api_token: str = Field(
-        default="",
-        description="Bearer token the browser extension sends. Empty = extension API disabled.",
+    # Browser-extension API. Callers authenticate with their own Dashboard session token,
+    # which is validated (read-only) against the Dashboard.
+    extension_api_enabled: bool = Field(default=False)
+    extension_api_host: str = Field(
+        default="127.0.0.1", description="Bind address. Use 0.0.0.0 behind a TLS proxy to host it."
     )
     extension_api_port: int = Field(default=8765, ge=1024, le=65535)
     github_token: str = Field(

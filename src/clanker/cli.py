@@ -1,11 +1,11 @@
 """Command-line entry points.
 
-    clanker queue             one-shot look at the pending queue
-    clanker show <cert-id>    full detail for one cert
-    clanker watch             run the watcher only (logs new certs, no reviews)
-    clanker review <cert-id>  run one full review (verdict + PDF, no Slack)
-    clanker daily             daily queue summary (print, or --post to Slack)
-    clanker run               run everything: watcher + reviews + Slack
+clanker queue             one-shot look at the pending queue
+clanker show <cert-id>    full detail for one cert
+clanker watch             run the watcher only (logs new certs, no reviews)
+clanker review <cert-id>  run one full review (verdict + PDF, no Slack)
+clanker daily             daily queue summary (print, or --post to Slack)
+clanker run               run everything: watcher + reviews + Slack
 """
 
 from __future__ import annotations

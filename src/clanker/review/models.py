@@ -70,9 +70,7 @@ class CheckResult(BaseModel):
     """A single check's outcome."""
 
     status: CheckStatus
-    details: str = Field(
-        default="", description="One or two sentences of evidence for the status."
-    )
+    details: str = Field(default="", description="One or two sentences of evidence for the status.")
 
     @model_validator(mode="before")
     @classmethod

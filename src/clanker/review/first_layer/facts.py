@@ -157,8 +157,7 @@ def code_facts(sec: dict[str, str]) -> dict[str, Any]:
         "readme_url_is_raw": is_raw_file_url(readme_url),
         "repo_host": repo.kind if (repo := parse_repo(repo_url)) else "unknown",
         "repo_url_is_repo_root": bool(
-            repo
-            and repo_url.rstrip("/").removesuffix(".git").lower() == repo.web_url.lower()
+            repo and repo_url.rstrip("/").removesuffix(".git").lower() == repo.web_url.lower()
         ),
         "demo_url_present": bool(demo_url and demo_url != "(none)"),
         "demo_url_is_repo_url": bool(
