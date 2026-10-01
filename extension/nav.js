@@ -25,7 +25,11 @@
     a.setAttribute("href", "#clanker");
     a.removeAttribute("aria-current");
     const svg = a.querySelector("svg");
-    if (svg) svg.innerHTML = BOT_ICON;
+    if (svg) {
+      const doc = new DOMParser().parseFromString(
+        `<svg xmlns="http://www.w3.org/2000/svg">${BOT_ICON}</svg>`, "image/svg+xml");
+      svg.replaceChildren(...[...doc.documentElement.childNodes].map((n) => document.importNode(n, true)));
+    }
     const label = a.querySelector("span");
     if (label) label.textContent = "Clanker";
     a.addEventListener("click", (e) => {

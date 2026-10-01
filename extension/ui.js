@@ -28,10 +28,20 @@
   };
   const verdictMeta = (v) => VERDICTS[v] || { label: v || "Unknown", tone: "neutral", icon: "alert" };
 
+  const SVG_NS = "http://www.w3.org/2000/svg";
+  // Parse the static icon paths as SVG (no innerHTML) and return a fresh <svg>.
+  function svgFrom(inner) {
+    const doc = new DOMParser().parseFromString(`<svg xmlns="${SVG_NS}">${inner}</svg>`, "image/svg+xml");
+    const svg = document.createElementNS(SVG_NS, "svg");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("aria-hidden", "true");
+    for (const node of doc.documentElement.childNodes) svg.append(document.importNode(node, true));
+    return svg;
+  }
+
   function icon(name, size) {
-    const wrap = document.createElement("span");
-    wrap.innerHTML = `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] || ""}</svg>`;
-    const svg = wrap.firstChild;
+    const svg = svgFrom(ICONS[name] || "");
+    svg.setAttribute("class", "ic");
     if (size) { svg.style.width = svg.style.height = size + "px"; }
     return svg;
   }
@@ -236,5 +246,5 @@
     return h("span", { class: `pill ${m.tone}` }, icon(m.icon, 10), m.label);
   }
 
-  globalThis.ClankerUI = { h, icon, verdictMeta, verdictPill, timeAgo, reasonPairs, copyText, toastFactory, detail };
+  globalThis.ClankerUI = { h, icon, svgFrom, verdictMeta, verdictPill, timeAgo, reasonPairs, copyText, toastFactory, detail };
 })();
