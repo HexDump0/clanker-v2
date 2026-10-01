@@ -81,41 +81,6 @@ async def test_list_filter_and_feedback(api, store):
     assert (await api.get("/api/results/zzz", headers=AUTH)).status == 404
 
 
-async def test_upload_video_calls_three_steps(api, store, tmp_path, monkeypatch):
-    video = tmp_path / "c1.mp4"
-    video.write_bytes(b"vid")
-    store.save_outcome(make_outcome(video=video))
-    calls = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        calls.append((request.method, request.url.path))
-        if request.method == "GET":
-            return httpx.Response(
-                200, json={"uploadUrl": "https://r2.example/put", "publicUrl": "https://cdn/c1.mp4"}
-            )
-        return httpx.Response(200, json={"ok": True})
-
-    real_init = ShipwrightsClient.__init__
-
-    def init(self, **kw):
-        real_init(self, **{**kw, "transport": httpx.MockTransport(handler)})
-
-    monkeypatch.setattr(ShipwrightsClient, "__init__", init)
-
-    async def fake_put(upload_url, path):
-        calls.append(("PUT", upload_url))
-
-    monkeypatch.setattr(ShipwrightsClient, "_put_video", staticmethod(fake_put))
-    resp = await api.post("/api/results/c1/upload-video", headers=AUTH)
-    assert resp.status == 200, await resp.text()
-    assert calls == [
-        ("GET", "/api/v1/workplaces/stardance/certifications/c1/upload"),
-        ("PUT", "https://r2.example/put"),
-        ("POST", "/api/v1/workplaces/stardance/certifications/c1/upload"),
-    ]
-    assert store.get("c1").uploaded_video_url == "https://cdn/c1.mp4"
-
-
 async def test_valid_token_is_cached_but_bad_one_is_rechecked(api):
     for _ in range(3):
         assert (await api.get("/api/results", headers=AUTH)).status == 200
@@ -124,7 +89,7 @@ async def test_valid_token_is_cached_but_bad_one_is_rechecked(api):
     await api.get("/api/results", headers=bad)
     await api.get("/api/results", headers=bad)
     assert VALIDATIONS.count("nope") == 2
-    assert (await api.get(f"/api/results?token={TOKEN}")).status == 200
+    assert (await api.get(f"/api/results?token={TOKEN}")).status == 401
 
 
 async def test_dashboard_validator_accepts_live_session_and_rejects_401(monkeypatch):

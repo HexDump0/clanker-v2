@@ -12,7 +12,6 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from http.cookies import SimpleCookie
-from pathlib import Path
 from types import TracebackType
 from typing import Any, Self
 
@@ -320,31 +319,3 @@ class ShipwrightsClient:
             self._wp(f"/certifications/{cert_id}"),
             json={"internalNotes": notes},
         )
-
-    async def upload_proof_video(self, cert_id: str, path: Path) -> str:
-        """Upload a video to R2 and attach it to the cert; returns the public URL. [MUTATING]
-
-        Three steps (see AI/context/API.md): presign, PUT the bytes, attach the URL.
-        """
-        self._require_mutations("upload_proof_video")
-        presign = await self._request(
-            "GET",
-            self._wp(f"/certifications/{cert_id}/upload"),
-            params={"filename": path.name, "contentType": "video/mp4"},
-        )
-        await self._put_video(presign["uploadUrl"], path)
-        await self._request(
-            "POST",
-            self._wp(f"/certifications/{cert_id}/upload"),
-            json={"url": presign["publicUrl"]},
-        )
-        return str(presign["publicUrl"])
-
-    @staticmethod
-    async def _put_video(upload_url: str, path: Path) -> None:
-        """PUT the bytes to the presigned storage URL (not the Dashboard; no cookie)."""
-        async with httpx.AsyncClient(timeout=300.0) as storage:
-            response = await storage.put(
-                upload_url, content=path.read_bytes(), headers={"Content-Type": "video/mp4"}
-            )
-            response.raise_for_status()

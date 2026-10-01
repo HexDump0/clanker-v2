@@ -203,6 +203,7 @@ def test_minimal_composition_has_bottom_right_fallback_and_no_gradients(tmp_path
 async def test_capture_keeps_page_metadata_without_freshness_validation(monkeypatch, tmp_path):
     screenshot_log = Mock()
     monkeypatch.setattr("clanker.review.video.capture.logfire.info", screenshot_log)
+
     async def handle(reader, writer):
         await reader.read(4096)
         body = b"<html><body><h1>Current page content</h1></body></html>"
@@ -364,7 +365,7 @@ async def test_review_runner_generates_video_from_review_evidence(monkeypatch, t
             description="A project",
             repo_url="https://github.com/example/repo",
             demo_url="https://example.com",
-        )
+        ),
     )
 
     class ReviewAgent:

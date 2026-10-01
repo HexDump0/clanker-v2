@@ -213,9 +213,7 @@ async def test_stardance_source_resolves_via_redirect(
 ) -> None:
     redirects = {"11077": DASH_URL}  # 11076 does not redirect (not imported)
     dashboard.details[DASH_CERT_ID] = make_cert(DASH_CERT_ID, externalId="11077")
-    source = StardancePendingSource(
-        stardance_client(redirects), client, probe_retry_delay=0.01
-    )
+    source = StardancePendingSource(stardance_client(redirects), client, probe_retry_delay=0.01)
     page = await source.pending_page(1)
     assert page.total == 105
     assert page.pages == 5  # ceil(105 / 25)
@@ -294,9 +292,7 @@ async def test_watcher_with_stardance_source_emits_only_imported(
             return httpx.Response(200, text="<html>old review page</html>")
         return httpx.Response(404, text="")
 
-    admin = StardanceAdminClient(
-        "test-session", transport=httpx.MockTransport(handler)
-    )
+    admin = StardanceAdminClient("test-session", transport=httpx.MockTransport(handler))
     watcher = Watcher(
         StardancePendingSource(admin, client, probe_retry_delay=0.01),
         state_file=tmp_path / "state.json",
@@ -324,9 +320,7 @@ async def test_watcher_state_source_switch_records_without_emitting(
 
     # switch to stardance: keys are a different namespace, so the watcher
     # records the current queue first instead of emitting everything.
-    source = StardancePendingSource(
-        stardance_client({}), client, probe_retry_delay=0.01
-    )
+    source = StardancePendingSource(stardance_client({}), client, probe_retry_delay=0.01)
     watcher = Watcher(source, state_file=state_file)
     assert await watcher.poll_once() == []
     saved = json.loads(state_file.read_text())

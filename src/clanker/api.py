@@ -3,9 +3,9 @@
 Auth is the caller's own Dashboard session token (``Authorization: Bearer <token>``). It is
 only *validated*: one read-only workplace request proves it is a live session with Dashboard
 access. It is cached (hashed) for a few minutes and never stored or used for anything else.
-The API is read-only apart from two human-triggered actions: saving "Clanker was right/wrong"
-feedback, and uploading a result's video to the cert (the extension's "Use video" button).
-It never submits a review verdict; a human does that in the dashboard.
+The only write is saving "Clanker was right/wrong" feedback. It never touches the Dashboard with
+anyone's token beyond validating it: the extension attaches videos itself, from the dashboard page,
+with the user's own session. A human submits the verdict in the dashboard.
 """
 
 from __future__ import annotations
@@ -77,8 +77,6 @@ async def _auth_and_cors(request: web.Request, handler: Any) -> web.StreamRespon
     if request.method == "OPTIONS":
         return web.Response(headers=cors)
     supplied = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
-    # The video is played in a <video> tag, which cannot send headers; allow ?token= there.
-    supplied = supplied or request.query.get("token", "")
     if not supplied or not await _is_valid(request.app, supplied):
         return web.json_response({"error": "unauthorized"}, status=401, headers=cors)
     response = await handler(request)
@@ -135,25 +133,6 @@ async def get_feedback_export(request: web.Request) -> web.Response:
     )
 
 
-async def post_upload_video(request: web.Request) -> web.Response:
-    """Upload the result's video to the cert. Only ever triggered by a human click."""
-    record = _record_or_404(request)
-    if not record.video_path:
-        return web.json_response({"error": "this result has no video"}, status=400)
-    from pathlib import Path
-
-    settings = request.app[SETTINGS]
-    try:
-        async with ShipwrightsClient.from_settings(settings, allow_mutations=True) as sw:
-            url = await sw.upload_proof_video(record.cert_id, Path(record.video_path))
-    except ShipwrightsError as exc:
-        logger.warning("Video upload failed for %s: %s", record.cert_id, exc)
-        return web.json_response({"error": str(exc)}, status=502)
-    request.app[STORE].set_uploaded_video(record.cert_id, url)
-    logger.info("Uploaded video for cert %s (human-triggered)", record.cert_id)
-    return web.json_response({"url": url})
-
-
 def build_api(
     settings: Settings, store: ResultStore, validator: TokenValidator | None = None
 ) -> web.Application:
@@ -167,7 +146,6 @@ def build_api(
     app.router.add_get("/api/results/{cert_id}", get_result)
     app.router.add_get("/api/results/{cert_id}/video", get_video)
     app.router.add_post("/api/results/{cert_id}/feedback", post_feedback)
-    app.router.add_post("/api/results/{cert_id}/upload-video", post_upload_video)
     return app
 
 

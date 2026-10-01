@@ -61,9 +61,7 @@ def build(tmp_path, seed="seed"):
     scenes = [
         scene(tmp_path, "readme", "https://example.com/a"),
         scene(tmp_path, "code", "https://github.com/o/r/blob/abc/" + "x" * 60, page_height=2400),
-        scene(
-            tmp_path, "heading", "https://example.com/b", box=HEADING
-        ),
+        scene(tmp_path, "heading", "https://example.com/b", box=HEADING),
     ]
     plan = VideoPlan(headline="h", summary="s", scenes=[s.directed for s in scenes])
     project = VideoProject(project_name="P", verdict="REJECTED", required_fixes=["Fix A", "Fix B"])

@@ -41,7 +41,6 @@ class ResultRecord(BaseModel):
     message: str | None = None  # copy-ready text for the shipper (REJECT)
     video_path: str | None = None
     pdf_path: str | None = None
-    uploaded_video_url: str | None = None
     created_at: str
     feedback: HumanFeedback | None = None
 
@@ -88,12 +87,11 @@ class ResultStore:
         os.replace(tmp, path)
 
     def save_outcome(self, outcome: ReviewOutcome) -> ResultRecord:
-        """Store a fresh result; keeps human feedback/upload info from an earlier run."""
+        """Store a fresh result; keeps human feedback from an earlier run."""
         record = record_from_outcome(outcome)
         previous = self.get(record.cert_id)
         if previous is not None:
             record.feedback = previous.feedback
-            record.uploaded_video_url = previous.uploaded_video_url
         self._write(record)
         return record
 
@@ -128,14 +126,6 @@ class ResultStore:
             wrong_checks=wrong_checks or [],
             decided_at=datetime.now(UTC).isoformat(),
         )
-        self._write(record)
-        return record
-
-    def set_uploaded_video(self, cert_id: str, url: str) -> ResultRecord:
-        record = self.get(cert_id)
-        if record is None:
-            raise KeyError(cert_id)
-        record.uploaded_video_url = url
         self._write(record)
         return record
 

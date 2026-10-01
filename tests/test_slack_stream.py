@@ -93,9 +93,7 @@ async def test_tool_result_uploads_review_pdf_and_video(tmp_path):
     event = FunctionToolResultEvent(
         part=ToolReturnPart(
             tool_name="run_review",
-            content=json.dumps(
-                {"ok": True, "pdf_path": str(pdf), "video_path": str(video)}
-            ),
+            content=json.dumps({"ok": True, "pdf_path": str(pdf), "video_path": str(video)}),
             tool_call_id="call_review",
         )
     )

@@ -81,9 +81,16 @@ def test_caps_at_three_issues():
 
 
 def test_no_awkward_joins_across_many_seeds():
-    combos = [["needs_api_key"], ["ai_undeclared"], ["ai_code"], ["demo_broken"],
-              ["ai_code", "ai_readme", "ai_undeclared"], ["banner_bad", "ai_undeclared"],
-              ["readme_not_raw"], ["demo_broken", "ai_code"]]
+    combos = [
+        ["needs_api_key"],
+        ["ai_undeclared"],
+        ["ai_code"],
+        ["demo_broken"],
+        ["ai_code", "ai_readme", "ai_undeclared"],
+        ["banner_bad", "ai_undeclared"],
+        ["readme_not_raw"],
+        ["demo_broken", "ai_code"],
+    ]
     for reasons in combos:
         for i in range(40):
             msg = compose_reject_message(reasons, CTX, f"s{i}")

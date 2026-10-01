@@ -263,7 +263,7 @@ async def test_first_layer_pdf_compiles(tmp_path, client, dashboard, scores):
     path = await generate_first_layer_pdf(
         build_report_data(result, packet),
         output_path=tmp_path / "fl.pdf",
-        project_name="Test \"Project\" #1 [x]",
+        project_name='Test "Project" #1 [x]',
         project_desc="Has $pecial *chars* _here_",
         repo_url="https://github.com/x/y",
         demo_url="https://example.com",

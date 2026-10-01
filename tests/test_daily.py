@@ -42,10 +42,20 @@ async def test_gather_daily_stats(client, dashboard):
     _queue(dashboard, now)
     dashboard.leaderboard = {
         "entries": [
-            {"memberId": "s:U092KBRD5SB", "name": "Utkrishth", "total": 11,
-             "approved": 0, "rejected": 11},
-            {"memberId": "s:U07950S3GMC", "name": "Shuflduf", "total": 7,
-             "approved": 3, "rejected": 4},
+            {
+                "memberId": "s:U092KBRD5SB",
+                "name": "Utkrishth",
+                "total": 11,
+                "approved": 0,
+                "rejected": 11,
+            },
+            {
+                "memberId": "s:U07950S3GMC",
+                "name": "Shuflduf",
+                "total": 7,
+                "approved": 3,
+                "rejected": 4,
+            },
         ]
     }
 

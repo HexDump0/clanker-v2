@@ -289,9 +289,7 @@ async def test_fetch_one_stardance_devlog():
     tools = ReviewTools(stardance_session="secret")
     tools._web = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     payload = json.loads(
-        await tools.fetch_stardance_devlog(
-            "https://stardance.hackclub.com/projects/42/devlogs/7"
-        )
+        await tools.fetch_stardance_devlog("https://stardance.hackclub.com/projects/42/devlogs/7")
     )
     assert payload["ok"] is True
     assert payload["devlog"]["id"] == "7"
@@ -338,9 +336,7 @@ async def test_url_checks_flag_disallowed_redirect_destination():
         return httpx.Response(200, headers={"content-type": "text/html"}, text="ok")
 
     tools = ReviewTools()
-    tools._web = httpx.AsyncClient(
-        transport=httpx.MockTransport(handler), follow_redirects=True
-    )
+    tools._web = httpx.AsyncClient(transport=httpx.MockTransport(handler), follow_redirects=True)
     payload = json.loads(await tools.fetch_page_text("https://example.com/demo"))
     assert payload["final_url"] == "https://redirected.streamlit.app/"
     assert payload["flags"] == ["streamlit"]
@@ -577,9 +573,7 @@ async def test_review_agent_uses_prompted_output_and_keeps_tools_optional():
     assert request is not None
     assert request.output_mode == "prompted"
     assert request.output_tools == []
-    assert {tool.name for tool in request.function_tools} == {
-        tool.__name__ for tool in tools.all()
-    }
+    assert {tool.name for tool in request.function_tools} == {tool.__name__ for tool in tools.all()}
 
 
 async def test_web_search_requires_key():
@@ -615,9 +609,7 @@ async def test_web_search_returns_trimmed_results():
 
     tools = ReviewTools(hackclub_ai_key="hc-key")
     tools._web = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-    payload = json.loads(
-        await tools.web_search("is somehost.io a tunnel service", num_results=3)
-    )
+    payload = json.loads(await tools.web_search("is somehost.io a tunnel service", num_results=3))
     assert payload["ok"] is True
     assert payload["results"] == [
         {
