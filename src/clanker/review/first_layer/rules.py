@@ -16,6 +16,7 @@ from typing import Any
 from typesafe_sdk import Choice, Noul
 
 from clanker.forges import parse_repo
+from clanker.review.first_layer.ai_css import REJECT_AT as AI_CSS_REJECT_AT
 
 # Jev thresholds, fixed before the holdout evaluation ("conservative2"). A reason missing
 # here is still asked but never rejects on its own.
@@ -249,6 +250,9 @@ def code_rules(answers: dict[str, Any], facts: dict[str, Any]) -> list[str]:
     reasons: list[str] = []
     ptype = answers.get("project_type", {})
     kind = ptype.get("choice") if ptype.get("confidence", 0) >= 0.5 else None
+    # Newer AI CSS house style that Jev's ai_code criteria don't describe (see ai_css.py).
+    if len(facts.get("modern_ai_css_signals") or []) >= AI_CSS_REJECT_AT:
+        reasons.append("ai_code")
     demo = facts.get("demo_url") or ""
     host = _host(demo)
     if facts.get("banner_is_default"):
@@ -322,6 +326,6 @@ def reject_decision(
             continue
         if key in ("ai_readme", "readme_thin") and not facts["readme_present"]:
             continue  # nothing to judge: missing (no_readme covers it) or unverified
-        if key in answers and answers[key]["noul"] >= t:
+        if key in answers and answers[key]["noul"] >= t and key not in reasons:
             reasons.append(key)
     return ("REJECT" if reasons else "PASS"), reasons

@@ -13,6 +13,7 @@ from datetime import date
 from typing import Any
 
 from clanker.forges import is_raw_file_url, parse_repo
+from clanker.review.first_layer.ai_css import modern_ai_css_signals
 
 CUTOFF = date(2026, 6, 1)
 
@@ -61,7 +62,8 @@ CODE_EXTS = (
 )  # fmt: skip
 
 # Long raw texts used by code rules but never shown to Jev.
-PRIVATE_FACTS = ("demo_text", "demo_render_all")
+# Kept out of Jev's state so the code CSS rule doesn't silently change Jev's answers.
+PRIVATE_FACTS = ("demo_text", "demo_render_all", "modern_ai_css_signals")
 
 
 def cut(text: str, limit: int) -> str:
@@ -212,6 +214,13 @@ def add_evidence(facts: dict[str, Any], evidence: dict[str, Any]) -> None:
         banner_label=evidence.get("banner"),
         release_assets=evidence.get("release_assets"),
         tree_code_files_v2=evidence.get("tree_code_files"),
+        modern_ai_css_signals=modern_ai_css_signals(
+            "\n".join(
+                f["excerpt"]
+                for f in evidence.get("files") or []
+                if f["path"].lower().endswith((".css", ".scss"))
+            )
+        ),
     )
 
 

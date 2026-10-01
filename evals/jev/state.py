@@ -22,10 +22,12 @@ from clanker.review.first_layer.facts import (  # noqa: E402
     BAD_DEMO_PATTERNS,  # noqa: F401  (re-exported for older eval scripts)
     CUTOFF,  # noqa: F401
     LIMITS,
+    PRIVATE_FACTS,
     SECTION_KEYS,  # noqa: F401
     code_facts,
     parse_packet,
 )
+from clanker.review.first_layer.ai_css import modern_ai_css_signals  # noqa: E402
 from clanker.review.first_layer.facts import cut as _cut  # noqa: E402
 
 
@@ -103,12 +105,17 @@ def build_states(
             banner_label=ev2.get("banner"),
             release_assets=ev2.get("release_assets"),
             tree_code_files_v2=ev2.get("tree_code_files"),
+            modern_ai_css_signals=modern_ai_css_signals(
+                "\n".join(
+                    f["excerpt"]
+                    for f in ev2.get("files") or []
+                    if f["path"].lower().endswith((".css", ".scss"))
+                )
+            ),
         )
         states["reject2"] = {
             **packet_state,
-            "computed_facts": {
-                k: v for k, v in facts.items() if k not in ("demo_text", "demo_render_all")
-            },
+            "computed_facts": {k: v for k, v in facts.items() if k not in PRIVATE_FACTS},
             "code_excerpts": ev2.get("files") or [],
         }
     return states

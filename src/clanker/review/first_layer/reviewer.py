@@ -16,6 +16,7 @@ from typing import Any, Literal
 import httpx
 
 from clanker.config import Settings
+from clanker.review.first_layer.ai_css import REJECT_AT as AI_CSS_REJECT_AT
 from clanker.review.first_layer.evidence import (
     create_banner_agent,
     gather_evidence,
@@ -223,6 +224,12 @@ class FirstLayerReviewer:
             and key not in reasons
             and limit - NEAR_MISS_MARGIN <= answers[key]["noul"] < limit
         ]
+        css_signals = facts.get("modern_ai_css_signals") or []
+        if AI_CSS_REJECT_AT - 2 <= len(css_signals) < AI_CSS_REJECT_AT:
+            near.append(
+                f"modern AI CSS signals {len(css_signals)} (limit {AI_CSS_REJECT_AT}: "
+                f"{', '.join(css_signals)})"
+            )
         result = FirstLayerResult(
             verdict=verdict,  # type: ignore[arg-type]
             reasons=reasons,
@@ -272,6 +279,14 @@ def to_review_output(result: FirstLayerResult) -> ReviewOutput:
             previous = rows[check].details if rows[check].status == CheckStatus.FAIL else ""
             detail = REASONS.get(reason, REASON_LABELS.get(reason, reason))
             rows[check] = _check(CheckStatus.FAIL, f"{previous} {detail}".strip())
+    css_signals = facts.get("modern_ai_css_signals") or []
+    if "ai_code" in result.reasons and len(css_signals) >= AI_CSS_REJECT_AT:
+        row = rows["ai_detection"]
+        rows["ai_detection"] = _check(
+            CheckStatus.FAIL,
+            f"{row.details} Modern AI CSS style ({len(css_signals)} signals: "
+            f"{', '.join(css_signals)}).",
+        )
 
     flags = ["AI UNDISCLOSED"] if "ai_undeclared" in result.reasons else []
     if result.verdict == "REJECT":
