@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Clanker for Shipwrights",
-  "version": "0.1.0",
-  "description": "See Clanker's judgement, reason and video on Shipwrights certifications, and fill them into your review.",
+  "version": "0.2.0",
+  "description": "Clanker's reviews inside the Shipwrights dashboard.",
   "permissions": [
     "cookies",
     "storage"
@@ -22,7 +22,7 @@
     ]
   },
   "action": {
-    "default_title": "Clanker judgements"
+    "default_title": "Clanker"
   },
   "content_scripts": [
     {
