@@ -102,6 +102,13 @@ It reconciles every 30 minutes in the background, on demand when the extension r
 tracked ship), so a restart cannot leave decided ships sitting in the queue. It needs
 `STARDANCE_SESSION`; see `.env.example` for the settings.
 
+Because the review log says what each reviewer *did*, agreement with Clanker follows from it —
+Clanker said reject and a reviewer returned it, so Clanker was right — without anyone clicking
+anything. That is `auto_agreement` on each record: a computed field, never stored, and never
+overriding a human's own right/wrong label. "Needs human" verdicts are not scored, since Clanker
+claimed nothing either way, and neither is a review that predates Clanker's verdict (after a
+resubmission the log still shows the previous attempt).
+
 The checked-in ferrocompiler benchmark can be rendered without a model call:
 
 ```sh

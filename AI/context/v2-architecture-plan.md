@@ -141,6 +141,35 @@ watcher only ever looks at ships nobody has seen, so it cannot answer "was this 
 days ago". PDF/video failure semantics are unchanged: a refresh failure returns the last
 known states instead of failing the request.
 
+### Agreement the data already implies (2026-10-02)
+
+Stardance's review log says what each human reviewer did, so agreement no longer needs a human
+to click anything. `clanker.results.infer_agreement` derives it and `ResultRecord.auto_agreement`
+exposes it as a **computed field** — never stored, so it cannot go stale, and it never touches
+`feedback`:
+
+| Clanker | reviewer | inferred |
+|---|---|---|
+| REJECT | returned | right |
+| APPROVE | approved | right |
+| REJECT | approved | wrong |
+| APPROVE | returned | wrong |
+| NEEDS HUMAN | anything | not scored — Clanker claimed nothing either way |
+
+Deliberately **not** scored:
+
+- a ship a human already labelled (their word wins, and `manual_review` is a human-only flag with
+  Slack consequences — an inferred disagreement must never take a ship off the queue);
+- a ship nobody has reviewed;
+- **a review older than Clanker's verdict.** The log keeps one row per ship — its *latest* review
+  (verified 2026-10-02: 500 rows / 500 distinct ships, and ships whose own feedback says "again as
+  mentioned before" still appear once) — so after a resubmission the logged action can be from the
+  previous attempt. Comparing it to a newer Clanker run would score a ship Clanker never saw.
+
+The extension shows it as `✓ inferred` / a tinted card reading "Read off the reviewer's decision.
+Nobody clicked this", and the All data tab's Agreement stat is computed from these rather than from
+handful of labels.
+
 ### Non-agentic components
 
 - watcher and new-cert detection;

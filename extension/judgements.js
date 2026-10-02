@@ -3,7 +3,7 @@
 // and a detail view where a human confirms or overrules Clanker's call. The real verdict is
 // still submitted by a human on the dashboard.
 (() => {
-  const { h, icon, badge, statusText, decisionText, timeAgo, reasonPairs, toastFactory, parts, videoBlob } = ClankerUI;
+  const { h, icon, badge, statusText, decisionText, autoTag, timeAgo, reasonPairs, toastFactory, parts, videoBlob } = ClankerUI;
   const SLUG = "stardance";
   const DASH = `https://ds.shipwrights.dev/${SLUG}/certifications/`;
   const drafts = new Map();   // edited feedback text per ship (survives re-renders)
@@ -63,6 +63,10 @@
       h("span", { class: "lbl" }, label), h("span", { class: "v" }, String(value), extra && h("span", { class: "pct" }, extra)));
     const of = (v) => queue.filter((r) => norm(r.verdict) === v).length;
     const agreement = () => cell("Agreement", labelled.length ? `${Math.round((right / labelled.length) * 100)}%` : "–", null, labelled.length ? `${labelled.length} labelled` : "");
+    // Inferred agreement: we know what the reviewer did, so this no longer needs a human to
+    // click anything. Needs-human verdicts are never scored - Clanker claimed nothing either way.
+    const inferred = all.filter((r) => r.auto_agreement);
+    const inferredRight = inferred.filter((r) => r.auto_agreement === "right").length;
     if (state.tab === "all") {
       return h("div", { class: "statbar" },
         cell("Judged", all.length, null, null, "hero"),
@@ -71,7 +75,7 @@
         cell("Approved", decided("Approved"), "ok"),
         cell("Returned", decided("Returned"), "bad"),
         cell("Got it wrong", count(wrong), "flag"),
-        agreement());
+        cell("Agreement", inferred.length ? `${Math.round((inferredRight / inferred.length) * 100)}%` : "–", null, inferred.length ? `${inferred.length} inferred` : ""));
     }
     return h("div", { class: "statbar" },
       cell("In queue", queue.length, null, null, "hero"),
@@ -158,7 +162,7 @@
     const lab = r.feedback
       ? h("span", { class: r.feedback.agreement === "right" ? "note-ok" : "flag", style: r.feedback.agreement === "right" ? "" : "color:var(--c)" },
           r.feedback.agreement === "right" ? "✓ right" : "✗ wrong")
-      : "—";
+      : autoTag(r) || "—";
     const decision = decisionText(r);
     if (r.reviewed_by) decision.title = `reviewed by ${r.reviewed_by}`;
     return h("button", { class: "tr" + (r.cert_id === state.cursor ? " cur" : ""), "data-id": r.cert_id, onclick: () => open(r.cert_id) },

@@ -95,6 +95,78 @@ class ResultRecord(BaseModel):
             return True
         return self.decision is None
 
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def auto_agreement(self) -> str | None:
+        """"right" / "wrong" inferred from the human's decision, or None when unknowable.
+
+        Never stored and never overwrites an explicit human label — this is what the data
+        already says, not what somebody claimed. See `infer_agreement` for the rules.
+        """
+        return infer_agreement(self)[0]
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def auto_reason(self) -> str:
+        """One line saying why `auto_agreement` came out the way it did ("" when unknown)."""
+        return infer_agreement(self)[1]
+
+
+def _parse_iso(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+# What a human's action means for a ship Clanker judged. Clanker said REJECT and the reviewer
+# sent it back is agreement; the reverse is disagreement. Clanker NEEDS HUMAN is not a claim
+# about the ship either way, so a human bouncing it is not a correction of Clanker.
+_AGREEMENT = {
+    ("REJECT", "returned"): "right",
+    ("APPROVE", "approved"): "right",
+    ("REJECT", "approved"): "wrong",
+    ("APPROVE", "returned"): "wrong",
+}
+
+
+def infer_agreement(record: ResultRecord) -> tuple[str | None, str]:
+    """Work out whether a human agreed with Clanker, and say why.
+
+    Returns ``(None, "")`` whenever the comparison would be unfair or meaningless:
+
+    - a human already labelled this ship themselves (their word wins, and the ship is flagged);
+    - nobody has reviewed it yet;
+    - the human's review is *older* than Clanker's. Stardance's review log keeps one row per
+      ship — its most recent review (verified 2026-10-02: 500 rows, 500 distinct ships, and
+      ships whose own feedback says "again as mentioned before" still appear once) — so after a
+      resubmission the logged action can be from the previous attempt, and comparing it to a
+      later Clanker run would score a ship Clanker never actually saw.
+    """
+    if record.manual_review:
+        return None, ""
+    if record.decision not in ("approved", "returned"):
+        return None, ""
+    human_at, clanker_at = _parse_iso(record.reviewed_at), _parse_iso(record.created_at)
+    if human_at is not None and clanker_at is not None and human_at < clanker_at:
+        return None, ""
+
+    who = f" by {record.reviewed_by}" if record.reviewed_by else ""
+    said = {
+        "REJECT": "Clanker said reject",
+        "APPROVE": "Clanker said approve",
+    }.get(record.verdict)
+    if said is None:
+        # NEEDS HUMAN, or an agent-path verdict we do not score.
+        return None, "" if record.verdict == "NEEDS_HUMAN" else f"unscored verdict {record.verdict}"
+    did = "a reviewer returned it" if record.decision == "returned" else "a reviewer approved it"
+    agreement = _AGREEMENT.get((record.verdict, record.decision))
+    if agreement is None:
+        return None, f"{said}, {did}{who}"
+    return agreement, f"{said}; {did}{who}"
+
 
 def record_from_outcome(outcome: ReviewOutcome) -> ResultRecord:
     fl = outcome.first_layer

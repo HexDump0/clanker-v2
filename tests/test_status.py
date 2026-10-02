@@ -6,7 +6,7 @@ import httpx
 import pytest
 
 from clanker.config import Settings
-from clanker.results import ResultRecord, ResultStore, ship_id_of
+from clanker.results import HumanFeedback, ResultRecord, ResultStore, ship_id_of
 from clanker.stardance import (
     StardanceAdminClient,
     StardanceAdminError,
@@ -764,3 +764,154 @@ def test_settings_default_to_refreshing() -> None:
     assert settings.status_refresh_log_limit == 50
     assert settings.status_cache_interval == 1800.0
     assert settings.status_startup_sweep is True
+
+
+# ---------------------------------------------------------------- inferred agreement
+
+
+def _judged(verdict: str, **over) -> ResultRecord:
+    """A record as it looks after both Clanker and a human have had a say."""
+    base = dict(
+        cert_id="c1",
+        project_name="Proj",
+        verdict=verdict,
+        created_at="2026-10-01T10:00:00+00:00",  # Clanker reviewed
+        decision="returned",
+        reviewed_by="frog",
+        reviewed_at="2026-10-01T14:00:00+00:00",  # the human reviewed afterwards
+        review_note="looks vibecoded",
+        waiting=False,
+    )
+    base.update(over)
+    return ResultRecord(**base)
+
+
+def test_reject_then_returned_is_agreement() -> None:
+    assert _judged("REJECT").auto_agreement == "right"
+    assert _judged("REJECT").auto_reason == "Clanker said reject; a reviewer returned it by frog"
+
+
+def test_approve_then_approved_is_agreement() -> None:
+    assert _judged("APPROVE", decision="approved").auto_agreement == "right"
+
+
+def test_clanker_reject_human_approved_is_disagreement() -> None:
+    record = _judged("REJECT", decision="approved")
+    assert record.auto_agreement == "wrong"
+    assert "approved it" in record.auto_reason
+
+
+def test_clanker_approve_human_returned_is_disagreement() -> None:
+    assert _judged("APPROVE").auto_agreement == "wrong"
+
+
+def test_needs_human_is_never_scored() -> None:
+    """Clanker claimed nothing either way, so a human bouncing it is not a correction."""
+    for decision in ("returned", "approved"):
+        record = _judged("NEEDS_HUMAN", decision=decision)
+        assert record.auto_agreement is None
+        assert record.auto_reason == ""
+
+
+def test_flag_for_human_is_never_scored() -> None:
+    """The agent path's verdict for the same idea."""
+    assert _judged("FLAG_FOR_HUMAN").auto_agreement is None
+
+
+def test_an_unreviewed_ship_has_no_verdict() -> None:
+    record = _judged("REJECT", decision=None, reviewed_at=None, reviewed_by=None)
+    assert record.auto_agreement is None
+
+
+def test_a_human_label_always_wins() -> None:
+    """Someone already said Clanker got it wrong: never infer over their word."""
+    record = _judged("REJECT", feedback=HumanFeedback(
+        agreement="wrong", note="readme exists", decided_at="2026-10-01T15:00:00+00:00",
+        by_name="Coolcream",
+    ))
+    assert record.manual_review is True
+    assert record.auto_agreement is None
+    assert record.auto_reason == ""
+
+
+def test_a_human_right_label_is_left_alone() -> None:
+    record = _judged("REJECT", feedback=HumanFeedback(
+        agreement="right", decided_at="2026-10-01T15:00:00+00:00", by_name="Kaboom",
+    ))
+    assert record.feedback.agreement == "right"
+    assert record.auto_agreement == "right"  # agrees, but a human still said so explicitly
+
+
+def test_a_review_that_predates_clanker_is_not_compared() -> None:
+    """The resubmission trap: the logged action is from the previous attempt."""
+    record = _judged("APPROVE", decision="returned", reviewed_at="2026-09-20T09:00:00+00:00")
+    assert record.auto_agreement is None
+    # Clanker re-reviewed afterwards, so the reviewer had not seen this verdict.
+
+
+def test_a_returned_then_resubmitted_ship_still_scores_its_agreement() -> None:
+    """Returned by a human, Clanker said reject, ship is back in the queue: still agreement."""
+    record = _judged("REJECT", waiting=True)
+    assert record.in_queue is True
+    assert record.auto_agreement == "right"
+
+
+def test_missing_or_unparsable_timestamps_do_not_block_scoring() -> None:
+    assert _judged("REJECT", reviewed_at=None).auto_agreement == "right"
+    assert _judged("REJECT", reviewed_at="not a date").auto_agreement == "right"
+    assert _judged("REJECT", created_at="nonsense").auto_agreement == "right"
+
+
+def test_an_unknown_verdict_is_reported_rather_than_scored() -> None:
+    record = _judged("SOMETHING_ELSE")
+    assert record.auto_agreement is None
+    assert "unscored" in record.auto_reason
+
+
+def test_a_re_review_makes_an_older_human_decision_uncomparable(tmp_path) -> None:
+    """The resubmission trap, end to end through the store.
+
+    Clanker reviews a ship, a human returns it, Clanker re-reviews and approves it. The
+    review log still holds the *earlier* return, so the comparison stops being valid the
+    moment Clanker's verdict is newer than the human's action.
+    """
+    from types import SimpleNamespace
+
+    store = ResultStore(tmp_path)
+    cert = SimpleNamespace(project_name="P", repo_url=None, demo_url=None, status=None)
+    outcome = SimpleNamespace(
+        cert_id="c1",
+        packet=SimpleNamespace(cert=cert, stardance_url="https://s/ship/15895"),
+        review=SimpleNamespace(
+            verdict=SimpleNamespace(value="APPROVE"), reasoning="", required_fixes=None
+        ),
+        first_layer=SimpleNamespace(verdict="APPROVE", summary="s", reasons=[], unsure=[]),
+        reject_message=None,
+        video_path=None,
+        pdf_path=None,
+    )
+    store.save_outcome(outcome)
+    store.set_review_state(
+        "c1",
+        decision="returned",
+        waiting=False,
+        reviewed_by="frog",
+        reviewed_at="2026-10-01T15:00:00+00:00",
+    )
+
+    record = store.get("c1")
+    # save_outcome stamps created_at as now, which is *after* the reviewer's action: Clanker has
+    # not seen a human verdict on this ship, so there is nothing to agree or disagree with.
+    assert record.auto_agreement is None
+    assert record.decision == "returned"  # but we still know a human acted
+
+    # The normal order: Clanker judged first, the reviewer acted after.
+    record.created_at = "2026-10-01T12:00:00+00:00"
+    assert record.auto_agreement == "wrong"
+    assert record.auto_reason == "Clanker said approve; a reviewer returned it by frog"
+
+    # Clanker looks again the next day. The log still shows the old return, which the reviewer
+    # gave before this verdict existed, so the comparison is dropped rather than scored wrong.
+    record.created_at = "2026-10-05T10:00:00+00:00"
+    assert record.auto_agreement is None
+    assert record.auto_reason == ""

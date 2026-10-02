@@ -49,6 +49,30 @@
   // "Waiting" is the only state that means there is still work; everything else is settled.
   const isDecided = (rec) => !rec.waiting && !!DECISIONS[rec.decision];
 
+  // Agreement the server inferred from the reviewer's decision (never from a click). Kept
+  // visually distinct from a human label, and it must never imply the ship was flagged: only a
+  // human saying "Clanker got it wrong" takes a ship off the queue and tells Slack.
+  const AUTO = {
+    right: { label: "Clanker was right", tone: "ok" },
+    wrong: { label: "A reviewer disagreed", tone: "bad" },
+  };
+  const autoMeta = (rec) =>
+    !rec.manual_review && AUTO[rec.auto_agreement] ? AUTO[rec.auto_agreement] : null;
+  function autoLine(rec) {
+    const meta = autoMeta(rec);
+    if (!meta) return null;
+    return h("div", { class: `auto ${meta.tone}` },
+      h("span", { class: "lbl" }, meta.label),
+      rec.auto_reason ? h("p", {}, rec.auto_reason) : null,
+      h("span", { class: "hint" }, "Read off the reviewer's decision. Nobody clicked this."));
+  }
+  const autoTag = (rec) => {
+    const meta = autoMeta(rec);
+    if (!meta) return null;
+    return h("span", { class: `auto-tag ${meta.tone}` },
+      meta.tone === "ok" ? "✓" : "✗", " inferred");
+  };
+
   const SVG_NS = "http://www.w3.org/2000/svg";
   // Parse the static icon paths as SVG (no innerHTML) and return a fresh <svg>.
   function svgFrom(inner) {
@@ -293,6 +317,7 @@
     showSaved(rec.feedback);
     out.feedback = h("div", { class: "pc accent" },
       h("div", { class: "pc-head" }, h("span", { class: "lbl" }, "Was Clanker right?")),
+      autoLine(rec),
       h("div", { class: "stack" }, rightBtn, wrongBtn), h("div", { style: "margin-top:8px" }, status, clearBtn), wrongForm);
 
     // PDF + re-request
@@ -335,5 +360,5 @@
     return root;
   }
 
-  globalThis.ClankerUI = { h, icon, svgFrom, verdictMeta, shown, decisionMeta, decisionText, isDecided, videoBlob, badge, statusText, timeAgo, reasonPairs, copyText, toastFactory, parts, detail };
+  globalThis.ClankerUI = { h, icon, svgFrom, verdictMeta, shown, decisionMeta, decisionText, isDecided, autoMeta, autoLine, autoTag, videoBlob, badge, statusText, timeAgo, reasonPairs, copyText, toastFactory, parts, detail };
 })();
