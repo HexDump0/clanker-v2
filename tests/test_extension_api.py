@@ -86,6 +86,57 @@ async def test_list_filter_and_feedback(api, store):
     assert (await api.get("/api/results/zzz", headers=AUTH)).status == 404
 
 
+async def test_results_carry_queue_membership(store, tmp_path):
+    store.save_outcome(make_outcome("decided", "REJECT"))
+    store.save_outcome(make_outcome("untouched", "APPROVE"))
+    store.set_review_state("decided", decision="returned", waiting=False)
+
+    async with TestClient(
+        TestServer(build_api(Settings(shipwrights_session="x"), store, fake_validator))
+    ) as c:
+        listed = {r["cert_id"]: r for r in await (await c.get("/api/results", headers=AUTH)).json()}
+
+    assert listed["decided"]["in_queue"] is False
+    assert listed["decided"]["decision"] == "returned"
+    assert listed["untouched"]["in_queue"] is True
+    assert listed["untouched"]["decision"] is None
+
+
+async def test_listing_refreshes_ship_states_first(store):
+    """The queue is only correct if /api/results brings the review states up to date."""
+    calls = []
+
+    async def refresh():
+        calls.append(1)
+        store.set_review_state("c1", decision="approved", waiting=False)
+
+    async with TestClient(
+        TestServer(
+            build_api(Settings(shipwrights_session="x"), store, fake_validator, refresh=refresh)
+        )
+    ) as c:
+        store.save_outcome(make_outcome("c1", "REJECT"))
+        listed = await (await c.get("/api/results", headers=AUTH)).json()
+
+    assert calls == [1]
+    assert listed[0]["in_queue"] is False  # the refresh landed before the response
+
+
+async def test_a_broken_refresh_still_serves_results(store):
+    async def refresh():
+        raise RuntimeError("stardance is down")
+
+    async with TestClient(
+        TestServer(
+            build_api(Settings(shipwrights_session="x"), store, fake_validator, refresh=refresh)
+        )
+    ) as c:
+        store.save_outcome(make_outcome("c1", "REJECT"))
+        resp = await c.get("/api/results", headers=AUTH)
+        assert resp.status == 200
+        assert (await resp.json())[0]["in_queue"] is True  # stale, but served
+
+
 async def test_valid_token_is_cached_but_bad_one_is_rechecked(api):
     for _ in range(3):
         assert (await api.get("/api/results", headers=AUTH)).status == 200
@@ -117,7 +168,7 @@ async def test_dashboard_validator_accepts_live_session_and_rejects_401(monkeypa
     assert await validate("bad") is None
 
 
-async def test_request_review_runs_once_then_cools_down(store):
+async def test_request_review_runs_once_then_cools_down(store, tmp_path):
     import asyncio
 
     release = asyncio.Event()
@@ -129,7 +180,12 @@ async def test_request_review_runs_once_then_cools_down(store):
         store.save_outcome(make_outcome(cert_id))
 
     VALIDATIONS.clear()
-    app = build_api(Settings(shipwrights_session="x"), store, fake_validator, review)
+    app = build_api(
+        Settings(shipwrights_session="x", extension_usage_file=tmp_path / "usage.json"),
+        store,
+        fake_validator,
+        review,
+    )
     async with TestClient(TestServer(app)) as c:
         first = await c.post("/api/results/new1/review", headers=AUTH)
         assert first.status == 202 and (await first.json())["state"] == "running"
@@ -148,11 +204,16 @@ async def test_request_review_runs_once_then_cools_down(store):
         assert (await c.post("/api/results/..%2fx/review", headers=AUTH)).status in (400, 404)
 
 
-async def test_failed_review_reports_error(store):
+async def test_failed_review_reports_error(store, tmp_path):
     async def review(cert_id: str, who: str | None = None) -> None:
         raise RuntimeError("cert not found")
 
-    app = build_api(Settings(shipwrights_session="x"), store, fake_validator, review)
+    app = build_api(
+        Settings(shipwrights_session="x", extension_usage_file=tmp_path / "usage.json"),
+        store,
+        fake_validator,
+        review,
+    )
     async with TestClient(TestServer(app)) as c:
         await c.post("/api/results/bad1/review", headers=AUTH)
         import asyncio

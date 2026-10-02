@@ -324,3 +324,48 @@ HTTP 500 (verified 2026-08-30).
   reconcile a new ship with a single Stardance request (one retry after 10s on a miss;
   second miss = "dash down", ship dropped). A redirect to `/login` means the Stardance
   session cookie expired.
+
+## Stardance admin review log (`clanker.status`)
+
+`GET https://stardance.hackclub.com/admin/certification/ship/logs` with the same
+`_stardance_session_4` cookie. A log of **reviews**, not a queue: one row per reviewed
+ship. This is the cheapest source for "has a human finished with this ship, what did they
+decide, and why" — no Dashboard traffic at all (verified live 2026-10-02).
+
+Params: `status` (`all` | `approved` | `returned`), `sort` (`newest` | `oldest`),
+`from` / `to` (dates; a `from` in the future yields "No reviewed ships match these
+filters"), `search`, `page`, `limit`.
+
+- **Outcomes are only `approved` and `returned`.** There is no "rejected": in Stardance a
+  negative review *is* "returned". Both mean a human has finished with the ship.
+- **`limit` is honoured well past 25.** `limit=500` returned 500 rows in one request
+  (~60 KB, ~1 s). Whole history is 507 pages x 25 at the time of writing.
+- **`search` takes a bare ship id** (`search=15895` returns just that ship, one request).
+  A leading `#` matches nothing (`search=%2315895` -> 0 rows). Project titles work too.
+- **Page walking is not reliable.** A `limit=500` walk skipped ids at the page boundary
+  (page 1 ended at 15301, page 2 began at 15306), and `sort=oldest` + deep pages repeats
+  rows. Same class of flakiness the queue's `approved`/`returned` walks showed. Use
+  `search` for specific ships instead of trusting an exhaustive walk.
+- Rows are plain `<tr>` (header uses `<th>`) with `ship-queue__cell-project`,
+  `ship-queue__cell-feedback`, `ship-queue__cell-status`. The same ships are *also*
+  rendered as `<a class="ship-queue__card">` for narrow screens — parse the table only or
+  every ship is counted twice. Per row: `ship-queue__project-title`,
+  `ship-queue__project-id` (`#15895`), a `ship-queue__project-meta` line of
+  `by <author>` / `reviewed by <name>` / `<n> minutes ago` (only a relative time; there is
+  no machine-readable timestamp), the reviewer's feedback **truncated by the page**, and a
+  `status-pill--approved|returned` pill.
+- The pending queue (`/admin/certification/ship?status=pending`) accepts `limit` too — all
+  195 waiting ships fitted in one request.
+
+**The two sets are disjoint**: a ship that is waiting has not been reviewed, and a reviewed
+ship is no longer waiting. Together they therefore describe every ship — which is what
+`ResultRecord.in_queue` is built on:
+
+| pending queue | review log | meaning | in the Clanker queue |
+|---|---|---|---|
+| listed | absent | untouched | yes |
+| absent | present | a human approved / returned it | no |
+| listed | present | returned, then resubmitted | yes |
+
+A result record can only exist for a cert the Dashboard already knows (the review packet
+needs its detail), so there is no import-lag blind spot for tracked ships.

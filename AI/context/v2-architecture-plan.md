@@ -124,6 +124,23 @@ A conversational assistant may answer follow-up questions about completed review
 Explicit `review <URL-or-ID>` commands are parsed by application code and do not require
 an LLM router.
 
+### Queue membership and the review log (2026-10-02)
+
+The Clanker queue is not Clanker's verdict — reject, approve and needs human all stay in it.
+A ship leaves when **a human decides it**, which is read from Stardance's own admin pages
+(never the Dashboard API, never a timer): the pending queue says what is still waiting, and
+`/admin/certification/ship/logs` says what has been reviewed (`approved` / `returned`, plus
+who, when and their feedback). The two sets are disjoint, so together they describe every
+ship, and a returned-then-resubmitted ship re-enters on its own. See `AI/context/API.md` for
+the markup contract and the pagination caveats.
+
+`clanker.status.StatusRefresher` runs one bounded pass **on demand** from
+`GET /api/results`, behind a TTL and a lock, so an idle bot makes no requests and an open
+page is never stale. It is a separate object from the watcher rather than part of it: the
+watcher only ever looks at ships nobody has seen, so it cannot answer "was this one decided
+days ago". PDF/video failure semantics are unchanged: a refresh failure returns the last
+known states instead of failing the request.
+
 ### Non-agentic components
 
 - watcher and new-cert detection;

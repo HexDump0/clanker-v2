@@ -20,10 +20,21 @@ if TYPE_CHECKING:
     from clanker.review.runner import ReviewOutcome
 
 _SAFE_ID = re.compile(r"^[A-Za-z0-9_-]+$")
+_SHIP_URL = re.compile(r"/ship/(\d+)")
+# Stardance spells a negative review "returned"; there is no "rejected" outcome in its review
+# log. Both mean a human has finished with the ship, so both close it out of the Clanker
+# queue. See `clanker.status` for how these are read.
+DECISIONS = frozenset({"approved", "returned"})
 
 
 def is_valid_id(cert_id: str) -> bool:
     return bool(_SAFE_ID.match(cert_id))
+
+
+def ship_id_of(stardance_url: str | None) -> str | None:
+    """The Stardance ship number (``#15895`` -> ``"15895"``) from a stored ship URL."""
+    match = _SHIP_URL.search(stardance_url or "")
+    return match.group(1) if match else None
 
 
 class HumanFeedback(BaseModel):
@@ -52,12 +63,37 @@ class ResultRecord(BaseModel):
     feedback: HumanFeedback | None = None
     requested_by: str | None = None  # who asked for this review from the extension
     slack_ts: str | None = None  # thread the review was announced in (for manual-review flags)
+    # What a human has since done with this ship, read from Stardance's review log by
+    # `clanker.status`. All None until the first pass, which is treated as "not decided", so
+    # nothing drops out of the queue before the refresher has run.
+    decision: str | None = None  # "approved" | "returned" | None (no review yet)
+    reviewed_by: str | None = None  # the reviewer's Stardance name
+    reviewed_at: str | None = None  # approximate ISO; the page only prints "3 minutes ago"
+    review_note: str | None = None  # the human's feedback text (truncated on the page)
+    waiting: bool | None = None  # back in the Stardance queue (a resubmission)
+    checked_at: str | None = None  # when we last read this ship's state
 
     @computed_field  # type: ignore[prop-decorator]
     @property
     def manual_review(self) -> bool:
         """A human said Clanker got this one wrong: it needs a manual review."""
         return self.feedback is not None and self.feedback.agreement == "wrong"
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def in_queue(self) -> bool:
+        """Still waiting on a human: not marked wrong, and no human has decided it yet.
+
+        Clanker's own verdict (reject / approve / needs human) never takes a ship off the
+        queue. A ship stays in while Stardance still lists it as waiting — that is how a
+        resubmission after a "returned" comes back on its own — and leaves once a review
+        log entry exists and it is no longer waiting.
+        """
+        if self.manual_review:
+            return False
+        if self.waiting:
+            return True
+        return self.decision is None
 
 
 def record_from_outcome(outcome: ReviewOutcome) -> ResultRecord:
@@ -108,14 +144,18 @@ class ResultStore:
         """Store a fresh result; keeps human feedback only if the new result is unchanged."""
         record = record_from_outcome(outcome)
         previous = self.get(record.cert_id)
-        if (
-            previous is not None
-            and previous.verdict == record.verdict
-            and previous.reasons == record.reasons
-        ):
-            record.feedback = previous.feedback
         if previous is not None:
             record.slack_ts = previous.slack_ts
+            # What a human did with the ship outlives our judgement of it: without this a
+            # re-review would drop a decided ship back into the Clanker queue.
+            record.decision = previous.decision
+            record.reviewed_by = previous.reviewed_by
+            record.reviewed_at = previous.reviewed_at
+            record.review_note = previous.review_note
+            record.waiting = previous.waiting
+            record.checked_at = previous.checked_at
+            if previous.verdict == record.verdict and previous.reasons == record.reasons:
+                record.feedback = previous.feedback
         self._write(record)
         return record
 
@@ -175,6 +215,46 @@ class ResultStore:
         if record is not None:
             record.slack_ts = ts
             self._write(record)
+
+    def set_review_state(
+        self,
+        cert_id: str,
+        *,
+        decision: str | None,
+        waiting: bool,
+        reviewed_by: str | None = None,
+        reviewed_at: str | None = None,
+        review_note: str | None = None,
+    ) -> ResultRecord | None:
+        """Record what a human has done with a ship, as read from Stardance's review log.
+
+        Skips the write when nothing changed. Read-modify-write is synchronous, so it cannot
+        interleave with another store write in the same event loop (feedback, thread or
+        review state) and lose an update.
+        """
+        record = self.get(cert_id)
+        if record is None:
+            return None
+        unchanged = (
+            record.decision == decision
+            and record.waiting == waiting
+            and record.reviewed_by == reviewed_by
+            and record.review_note == review_note
+            and (reviewed_at is None or record.reviewed_at == reviewed_at)
+        )
+        if unchanged:
+            # Still record that we looked, so "checked 2m ago" stays honest.
+            record.checked_at = datetime.now(UTC).isoformat()
+            self._write(record)
+            return record
+        record.decision = decision
+        record.waiting = waiting
+        record.reviewed_by = reviewed_by
+        record.reviewed_at = reviewed_at or record.reviewed_at
+        record.review_note = review_note
+        record.checked_at = datetime.now(UTC).isoformat()
+        self._write(record)
+        return record
 
     def export_feedback_jsonl(self) -> str:
         """Every human-labelled result, one JSON object per line (for evals)."""

@@ -9,6 +9,10 @@ credentials in ``.env``, never a caller's token.
 The only writes are right/wrong labels ("wrong" flags the ship for manual review and tells Slack)
 and queueing a Clanker review a user asked for. The extension attaches videos itself, from the
 dashboard page, with the user's own session. A human submits the verdict in the dashboard.
+
+``refresh`` is an optional coroutine that brings each record's review state up to date before
+the list is served; it never raises, so a Dashboard/Stardance outage returns the last known
+states instead of failing the request.
 """
 
 from __future__ import annotations
@@ -33,6 +37,7 @@ from clanker.shipwrights.client import AuthenticationError, ShipwrightsError
 TokenValidator = Callable[[str], Awaitable["Identity | None"]]
 ReviewFn = Callable[[str, "str | None"], Awaitable[object]]
 ManualReviewFn = Callable[[ResultRecord], Awaitable[object]]
+RefreshFn = Callable[[], Awaitable[object]]
 VALID_TTL = 300.0
 INVALID_TTL = 60.0  # remember bad tokens so strangers can't make us hammer the Dashboard
 MAX_AUTH_FAILURES = 20  # per client IP per minute
@@ -49,6 +54,7 @@ AUTH_CACHE = web.AppKey("auth_cache", dict)
 AUTH_FAILS = web.AppKey("auth_fails", dict)
 LIMITER = web.AppKey("limiter", object)
 BG = web.AppKey("bg", set)
+REFRESH = web.AppKey("refresh", object)
 
 
 class ReviewJobs:
@@ -210,6 +216,15 @@ def _record_or_404(request: web.Request):
 
 
 async def list_results(request: web.Request) -> web.Response:
+    # Bring ship review states up to date first (a couple of read-only Stardance requests,
+    # skipped unless one is due), so the queue reflects what humans have decided. A failure
+    # here must not fail the request: the extension gets the last known states instead.
+    refresh = request.app.get(REFRESH)
+    if refresh is not None:
+        try:
+            await refresh()
+        except Exception:
+            logger.warning("Could not refresh ship review states", exc_info=True)
     records = request.app[STORE].list(request.query.get("verdict"))
     return web.json_response([r.model_dump(mode="json") for r in records])
 
@@ -318,6 +333,7 @@ def build_api(
     review: ReviewFn | None = None,
     on_manual_review: ManualReviewFn | None = None,
     limiter: UsageLimiter | None = None,
+    refresh: RefreshFn | None = None,
 ) -> web.Application:
     app = web.Application(middlewares=[_auth_and_cors])
     app[STORE] = store
@@ -332,6 +348,7 @@ def build_api(
         per_day=settings.extension_reviews_per_day,
     )
     app[FLAG] = on_manual_review
+    app[REFRESH] = refresh
     app[JOBS] = ReviewJobs(review, settings.max_concurrent_reviews) if review else None
     app.router.add_get("/api/me", get_me)
     app.router.add_get("/api/results", list_results)
@@ -350,9 +367,12 @@ async def run_extension_api(
     store: ResultStore,
     review: ReviewFn | None = None,
     on_manual_review: ManualReviewFn | None = None,
+    refresh: RefreshFn | None = None,
 ) -> None:
     runner = web.AppRunner(
-        build_api(settings, store, review=review, on_manual_review=on_manual_review)
+        build_api(
+            settings, store, review=review, on_manual_review=on_manual_review, refresh=refresh
+        )
     )
     await runner.setup()
     await web.TCPSite(runner, settings.extension_api_host, settings.extension_api_port).start()

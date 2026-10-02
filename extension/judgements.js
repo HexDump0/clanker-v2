@@ -1,7 +1,9 @@
-// Clanker judgements. A dashboard-style table of everything Clanker judged, and a detail view where a
-// human confirms or overrules Clanker's call. The real verdict is still submitted by a human on the dashboard.
+// Clanker judgements. Two tabs over the same records: the Clanker queue (ships a human still
+// has to act on) and All data (everything Clanker has ever judged). A dashboard-style table,
+// and a detail view where a human confirms or overrules Clanker's call. The real verdict is
+// still submitted by a human on the dashboard.
 (() => {
-  const { h, icon, badge, statusText, timeAgo, reasonPairs, toastFactory, parts, videoBlob } = ClankerUI;
+  const { h, icon, badge, statusText, decisionText, timeAgo, reasonPairs, toastFactory, parts, videoBlob } = ClankerUI;
   const SLUG = "stardance";
   const DASH = `https://ds.shipwrights.dev/${SLUG}/certifications/`;
   const drafts = new Map();   // edited feedback text per ship (survives re-renders)
@@ -10,9 +12,9 @@
   const KEY = "clanker.page";
 
   const state = { results: [], loaded: false, error: null, view: "list", selected: null, cursor: null,
-    verdict: "", queue: "queue", q: "", sort: "created", dir: -1 };
+    tab: "queue", scope: "queue", decision: "", verdict: "", q: "", sort: "created", dir: -1 };
   try { Object.assign(state, JSON.parse(sessionStorage.getItem(KEY) || "{}"), { view: "list" }); } catch {}
-  const save = () => { try { sessionStorage.setItem(KEY, JSON.stringify({ verdict: state.verdict, sort: state.sort, dir: state.dir })); } catch {} };
+  const save = () => { try { sessionStorage.setItem(KEY, JSON.stringify({ tab: state.tab, scope: state.scope, decision: state.decision, verdict: state.verdict, sort: state.sort, dir: state.dir })); } catch {} };
 
   const app = document.getElementById("app");
   const toast = toastFactory(document.body);
@@ -20,10 +22,20 @@
   const ORDER = { REJECT: 0, NEEDS_HUMAN: 1, APPROVE: 2 };
 
   // ---------- derived ----------
+  // Older servers predate the review-state fields; fall back to "everything but wrong", which
+  // is what the queue was before ships could be seen as decided.
+  const inQueue = (r) => (typeof r.in_queue === "boolean" ? r.in_queue : !r.manual_review);
+  const wrong = (r) => !!r.manual_review;
+
+  // The Clanker queue is everything a human has not finished with. The All data tab drops the
+  // queue restriction entirely, so decided and Clanker-got-it-wrong ships show up again.
+  const scoped = () => {
+    if (state.scope === "wrong") return state.results.filter(wrong);
+    return state.tab === "all" ? state.results : state.results.filter(inQueue);
+  };
   const matches = (r) => {
     if (state.verdict && norm(r.verdict) !== state.verdict) return false;
-    // The Clanker queue is everything except ships a human said Clanker got wrong.
-    if (state.queue === "queue" ? r.manual_review : !r.manual_review) return false;
+    if (state.decision && ClankerUI.decisionMeta(r).label !== state.decision) return false;
     if (state.q) {
       const hay = [r.project_name, r.summary, ...reasonPairs(r).map((p) => p.label)].join(" ").toLowerCase();
       if (!hay.includes(state.q.toLowerCase())) return false;
@@ -32,30 +44,60 @@
   };
   const sortKey = (r) => state.sort === "project" ? r.project_name.toLowerCase()
     : state.sort === "verdict" ? ORDER[norm(r.verdict)] ?? 9 : r.created_at;
-  const visible = () => state.results.filter(matches).sort((a, b) => {
+  const visible = () => scoped().filter(matches).sort((a, b) => {
     const x = sortKey(a), y = sortKey(b);
     return (x < y ? -1 : x > y ? 1 : 0) * state.dir;
   });
   const count = (fn) => state.results.filter(fn).length;
-  const inQueue = (r) => !r.manual_review;
   const rec = () => state.results.find((r) => r.cert_id === state.selected);
 
   // ---------- top bar ----------
   function statBar() {
-    const labelled = state.results.filter((r) => r.feedback);
+    const all = state.results;
+    const queue = all.filter(inQueue);
+    const labelled = all.filter((r) => r.feedback);
     const right = labelled.filter((r) => r.feedback.agreement === "right").length;
-    const queue = state.results.filter(inQueue);
+    const decided = (d) => all.filter((r) => ClankerUI.decisionMeta(r).label === d).length;
     const pct = (n) => (queue.length ? `${Math.round((n / queue.length) * 100)}%` : "");
     const cell = (label, value, tone, extra, cls = "") => h("div", { class: `sb ${tone ? "c " + tone : ""} ${cls}` },
       h("span", { class: "lbl" }, label), h("span", { class: "v" }, String(value), extra && h("span", { class: "pct" }, extra)));
     const of = (v) => queue.filter((r) => norm(r.verdict) === v).length;
+    const agreement = () => cell("Agreement", labelled.length ? `${Math.round((right / labelled.length) * 100)}%` : "–", null, labelled.length ? `${labelled.length} labelled` : "");
+    if (state.tab === "all") {
+      return h("div", { class: "statbar" },
+        cell("Judged", all.length, null, null, "hero"),
+        cell("Still open", queue.length, null, decided("Not reviewed") ? `${decided("Not reviewed")} untouched` : ""),
+        // (no percentages here: these count decisions, they are not shares of the queue)
+        cell("Approved", decided("Approved"), "ok"),
+        cell("Returned", decided("Returned"), "bad"),
+        cell("Got it wrong", count(wrong), "flag"),
+        agreement());
+    }
     return h("div", { class: "statbar" },
       cell("In queue", queue.length, null, null, "hero"),
       cell("Rejects", of("REJECT"), "bad", pct(of("REJECT"))),
       cell("Approves", of("APPROVE"), "ok", pct(of("APPROVE"))),
       cell("Needs human", of("NEEDS_HUMAN"), "warn"),
-      cell("Got it wrong", count((r) => r.manual_review), "flag"),
-      cell("Agreement", labelled.length ? `${Math.round((right / labelled.length) * 100)}%` : "–", null, labelled.length ? `${labelled.length} labelled` : ""));
+      cell("Got it wrong", count(wrong), "flag"),
+      agreement());
+  }
+
+  function tabBar() {
+    const tab = (id, label, n) => h("button", { class: `tab ${state.tab === id ? "on" : ""}`,
+      "aria-current": state.tab === id || null, onclick: () => setTab(id) }, label, h("span", { class: "n" }, String(n)));
+    return h("div", { class: "tabs", role: "tablist" },
+      tab("queue", "Clanker queue", state.results.filter(inQueue).length),
+      tab("all", "All data", state.results.length));
+  }
+
+  function setTab(id) {
+    state.tab = id;
+    state.scope = "queue";   // the wrong-only view is available on both tabs
+    state.verdict = "";
+    state.decision = "";
+    state.cursor = null;
+    save();
+    render();
   }
 
   function topBar() {
@@ -74,22 +116,34 @@
   }
 
   function filters() {
-    const queue = state.results.filter(inQueue);
-    const v = (value, name, tone) => {
-      const n = value ? queue.filter((r) => norm(r.verdict) === value).length : queue.length;
-      const on = state.queue === "queue" && state.verdict === value;
-      return h("button", { class: `fbtn ${tone || ""} ${on ? "on" : ""}`, onclick: () => { state.queue = "queue"; state.verdict = value; save(); render(); } },
+    const base = scoped();
+    const pick = (field, value, name, tone) => {
+      const n = value ? base.filter((r) => (field === "decision" ? ClankerUI.decisionMeta(r).label : norm(r.verdict)) === value).length : base.length;
+      const on = state[field] === value;
+      return h("button", { class: `fbtn ${tone || ""} ${on ? "on" : ""}`,
+        onclick: () => { state[field] = value; state.scope = "queue"; save(); render(); } },
         tone && h("span", { class: `dot ${tone}` }), name, h("span", { class: "n" }, String(n)));
     };
-    const wrong = count((r) => r.manual_review);
+    const nWrong = count(wrong);
     const search = h("input", { type: "search", placeholder: "Search ships and reasons…", value: state.q, "aria-label": "Search" });
     search.addEventListener("input", () => { state.q = search.value; renderTable(); });
+    const row = [pick("verdict", "", "All")];
+    // On the queue tab the verdict split is the useful axis; on All data the human decision is.
+    if (state.tab === "all") {
+      row.push(pick("decision", "Not reviewed", "Not reviewed"), pick("decision", "Waiting", "Waiting", "warn"),
+        pick("decision", "Approved", "Approved", "ok"), pick("decision", "Returned", "Returned", "bad"));
+    } else {
+      row.push(pick("verdict", "REJECT", "Reject", "bad"), pick("verdict", "APPROVE", "Approve", "ok"),
+        pick("verdict", "NEEDS_HUMAN", "Needs human", "warn"));
+    }
+    row.push(h("button", { class: `fbtn flag ${state.scope === "wrong" ? "on" : ""}`,
+      title: "Ships a human marked wrong. They are off the Clanker queue.",
+      onclick: () => { state.scope = state.scope === "wrong" ? "queue" : "wrong"; state.decision = ""; render(); } },
+      h("span", { class: "dot flag" }), "Clanker got it wrong", h("span", { class: "n" }, String(nWrong))));
     return h("div", { class: "filters" },
-      h("div", { class: "frow" }, v("", "Clanker queue"), v("REJECT", "Reject", "bad"), v("APPROVE", "Approve", "ok"), v("NEEDS_HUMAN", "Needs human", "warn"),
-        h("button", { class: `fbtn flag ${state.queue === "wrong" ? "on" : ""}`, title: "Ships a human marked wrong. They are off the Clanker queue.",
-          onclick: () => { state.queue = state.queue === "wrong" ? "queue" : "wrong"; render(); } },
-          h("span", { class: "dot flag" }), "Clanker got it wrong", h("span", { class: "n" }, String(wrong))),
-        h("div", { class: "search" }, search)));
+      h("div", { class: "frow" }, ...row, h("div", { class: "search" }, search)),
+      state.tab === "queue" ? h("div", { class: "hint" },
+        "Ships a human has since approved or returned are no longer here — find them under All data.") : null);
   }
 
   function th(label, key) {
@@ -105,8 +159,10 @@
       ? h("span", { class: r.feedback.agreement === "right" ? "note-ok" : "flag", style: r.feedback.agreement === "right" ? "" : "color:var(--c)" },
           r.feedback.agreement === "right" ? "✓ right" : "✗ wrong")
       : "—";
+    const decision = decisionText(r);
+    if (r.reviewed_by) decision.title = `reviewed by ${r.reviewed_by}`;
     return h("button", { class: "tr" + (r.cert_id === state.cursor ? " cur" : ""), "data-id": r.cert_id, onclick: () => open(r.cert_id) },
-      h("span", { class: "td-name" }, r.project_name), statusText(r),
+      h("span", { class: "td-name" }, r.project_name), statusText(r), decision,
       h("span", { class: "td-why", title: why }, why), h("span", { class: "td-lab" }, lab),
       h("span", { class: "td-when", title: new Date(r.created_at).toLocaleString() }, timeAgo(r.created_at)));
   }
@@ -117,7 +173,8 @@
 
   function tableBox() {
     const box = h("div", { class: "table", id: "tablebox" });
-    box.append(h("div", { class: "tr head" }, th("Project", "project"), th("Verdict", "verdict"), h("span", { class: "lbl" }, "Reason"), h("span", { class: "lbl" }, "Feedback"), th("Reviewed", "created")));
+    box.append(h("div", { class: "tr head" }, th("Project", "project"), th("Clanker", "verdict"),
+      h("span", { class: "lbl" }, "Human"), h("span", { class: "lbl" }, "Reason"), h("span", { class: "lbl" }, "Feedback"), th("Reviewed", "created")));
     if (!state.loaded) { box.append(...Array.from({ length: 7 }, () => h("div", { class: "skel" }))); return box; }
     if (state.error) {
       box.append(emptyBox("Can't reach the Clanker API", state.error,
@@ -130,7 +187,16 @@
       return box;
     }
     const items = visible();
-    if (!items.length) { box.append(emptyBox(state.queue === "wrong" ? "Nothing here" : state.q || state.verdict ? "No matches" : "The queue is empty", state.queue === "wrong" ? "No ships are marked as wrong." : "Nothing in this view.")); return box; }
+    if (!items.length) {
+      const filtered = state.scope === "wrong" || state.q || state.verdict || state.decision;
+      box.append(emptyBox(
+        state.scope === "wrong" ? "Nothing here" : filtered ? "No matches" : state.tab === "all" ? "Nothing judged yet" : "The queue is clear",
+        state.scope === "wrong" ? "No ships are marked as wrong."
+          : filtered ? "Nothing in this view."
+          : state.tab === "all" ? "Ships show up here after Clanker reviews them."
+          : "Every ship Clanker judged has been approved or returned by a human. Decided ships are under All data."));
+      return box;
+    }
     if (!items.some((r) => r.cert_id === state.cursor)) state.cursor = items[0].cert_id;
     box.append(...items.map(row), h("div", { class: "pager" }, h("span", {}, `${items.length} of ${state.results.length} ships`), h("span", {}, "j / k to move · Enter to open")));
     return box;
@@ -159,7 +225,12 @@
   }
 
   function reviewCard(r, textarea) {
-    const info = dashInfo.get(r.cert_id);
+    // Seed from the server's stored review state so the row is never blank; the bridge's live
+    // read replaces it when the page is open inside the dashboard.
+    const stored = ClankerUI.isDecided(r)
+      ? { status: r.decision === "approved" ? "APPROVED" : "REJECTED" }
+      : r.waiting ? { status: "PENDING" } : null;
+    const info = dashInfo.get(r.cert_id) || stored;
     const statusVal = h("span", { class: "v" }, "…");
     const kv = h("div", { class: "kv" }, h("span", { class: "k" }, "Dashboard status"), statusVal);
     // The video is part of the rejection: always attached, except when Clanker got this one wrong (its video shows the wrong reasons).
@@ -183,7 +254,7 @@
     if (ClankerBridge.available) {
       ClankerBridge.status(SLUG, r.cert_id).then((i) => { dashInfo.set(r.cert_id, i); apply(i); })
         .catch((e) => { statusVal.textContent = "–"; note.textContent = `Couldn't read the dashboard: ${e.message}`; });
-    } else apply(null);
+    } else apply(info); // outside the dashboard there is nothing live to read; show what we know
 
     btn.addEventListener("click", () => confirmReject(r, textarea.value, withVideo));
     return h("div", { class: "pc accent" }, h("div", { class: "pc-head" }, h("span", { class: "lbl" }, "Review")), kv, attachRow, h("div", { style: "margin-top:10px" }, btn), note);
@@ -207,6 +278,9 @@
         if (withVideo) { status.textContent = "Loading the video…"; video = await videoBlob(ClankerApi, r.cert_id); }
         await ClankerBridge.reject({ slug: SLUG, id: r.cert_id, comment, video }, (t) => (status.textContent = t));
         dashInfo.set(r.cert_id, { status: "REJECTED" });
+        // The review is now submitted, so this ship is decided: keep it out of the queue
+        // until the server's next pass confirms it.
+        r.decision = "returned"; r.waiting = false; r.in_queue = false;
         drafts.delete(r.cert_id);
         // Rejecting after Clanker also said reject is agreement: label it right (never overwrite an existing label).
         let labelled = false;
@@ -268,7 +342,7 @@
   let detail = null;
   function render() {
     detail = null;
-    const nodes = [topBar()];
+    const nodes = [tabBar(), topBar()];
     if (state.view === "detail" && rec()) { detail = detailView(rec()); nodes.push(detail); }
     else { state.view = "list"; nodes.push(filters(), tableBox()); }
     const y = scrollY; app.replaceChildren(...nodes); scrollTo(0, y);
@@ -324,7 +398,7 @@
       try {
         const done = await ClankerApi.runReview(id, (t) => (status.textContent = t));
         if (done.state === "failed") throw new Error(done.error || "review failed");
-        d.close(); state.verdict = ""; state.queue = "queue"; state.q = "";
+        d.close(); state.verdict = ""; state.decision = ""; state.scope = "queue"; state.q = "";
         await load(); open(id); toast("Review ready", "ok");
       } catch (e) { status.textContent = e.message; status.className = "hint note-bad"; go.disabled = input.disabled = false; }
     };

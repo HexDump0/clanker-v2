@@ -29,6 +29,26 @@
   };
   const verdictMeta = (v) => VERDICTS[v] || { label: v || "Unknown", tone: "neutral", icon: "alert" };
 
+  // What a human has since done with the ship, read from Stardance's review log by the
+  // server. Clanker's verdict and this are independent: a ship Clanker rejected can still be
+  // waiting, and a ship Clanker approved can come back as "returned".
+  const DECISIONS = {
+    approved: { label: "Approved", tone: "ok" },
+    returned: { label: "Returned", tone: "bad" },
+  };
+  function decisionMeta(rec) {
+    if (rec.waiting) return { label: "Waiting", tone: "warn" };
+    const found = DECISIONS[rec.decision];
+    if (found) return found;
+    return { label: "Not reviewed", tone: "neutral" };
+  }
+  const decisionText = (rec) => {
+    const m = decisionMeta(rec);
+    return h("span", { class: `st ${m.tone}` }, m.label.toLowerCase());
+  };
+  // "Waiting" is the only state that means there is still work; everything else is settled.
+  const isDecided = (rec) => !rec.waiting && !!DECISIONS[rec.decision];
+
   const SVG_NS = "http://www.w3.org/2000/svg";
   // Parse the static icon paths as SVG (no innerHTML) and return a fresh <svg>.
   function svgFrom(inner) {
@@ -145,6 +165,18 @@
     if (manual) { opts = { ...opts, useReason: undefined, useVideo: undefined }; } // never push a wrong message
     const out = {};
 
+    // What a human did with the ship, if anything. The review log's own words are worth more
+    // than a status word, so show them.
+    const decided = isDecided(rec);
+    const humanLine = decided
+      ? h("span", {}, `${decisionMeta(rec).label.toLowerCase()}`,
+          rec.reviewed_by ? ` by ${rec.reviewed_by}` : "",
+          rec.reviewed_at ? ` · ${timeAgo(rec.reviewed_at)}` : "")
+      : null;
+    const humanNote = decided && rec.review_note
+      ? h("p", { style: "font-size:13px;opacity:.85;margin-top:6px" }, `“${rec.review_note}”`)
+      : null;
+
     if (manual) {
       out.banner = h("div", { class: "banner flag" },
         h("div", { class: "top" }, h("span", { class: "lbl", style: "color:inherit;opacity:.75" }, fb?.by_name ? `Clanker · marked wrong by ${fb.by_name}` : "Clanker · marked wrong"),
@@ -154,6 +186,11 @@
     } else out.banner = h("div", { class: `banner ${meta.tone}` },
       h("div", { class: "top" }, h("span", { class: "lbl", style: "color:inherit;opacity:.75" }, "Clanker"), h("span", { title: new Date(rec.created_at).toLocaleString() }, `reviewed ${timeAgo(rec.created_at)}`)),
       h("p", {}, rec.summary || "No summary."));
+    if (humanLine && !manual) {
+      const top = out.banner.querySelector(".top");
+      top.append(h("span", { class: "dot " + decisionMeta(rec).tone }), humanLine);
+    }
+    if (humanNote && !manual) out.banner.append(humanNote);
 
     // message for the shipper (rejects)
     if (rec.message) {
@@ -205,7 +242,8 @@
     const kv = (k, v) => h("div", { class: "kv" }, h("span", { class: "k" }, k), h("span", { class: "v" }, v));
     out.info = h("div", { class: "pc" },
       kv("Ship", h("span", { title: rec.cert_id }, rec.cert_id.slice(0, 8))),
-      kv("Verdict", statusText(rec)),
+      kv("Clanker", statusText(rec)),
+      kv("Human", decisionText(rec)),
       kv("Feedback", fb ? (manual ? "Clanker got it wrong" : "right") : "—"),
       kv("Reviewed", new Date(rec.created_at).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })),
       kv("Reasons", String(pairs.length)));
@@ -297,5 +335,5 @@
     return root;
   }
 
-  globalThis.ClankerUI = { h, icon, svgFrom, verdictMeta, shown, videoBlob, badge, statusText, timeAgo, reasonPairs, copyText, toastFactory, parts, detail };
+  globalThis.ClankerUI = { h, icon, svgFrom, verdictMeta, shown, decisionMeta, decisionText, isDecided, videoBlob, badge, statusText, timeAgo, reasonPairs, copyText, toastFactory, parts, detail };
 })();

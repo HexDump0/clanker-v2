@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from html.parser import HTMLParser
 from urllib.parse import urlparse
 
@@ -192,6 +193,170 @@ def normalize_session(raw: str) -> str:
     return value.removeprefix(f"{STARDANCE_COOKIE_NAME}=").strip()
 
 
+# --------------------------------------------------------------------------
+# Review log — what a human has already done with each ship
+# --------------------------------------------------------------------------
+#
+# ``/admin/certification/ship/logs`` is a log of *reviews*, not a queue: one row per
+# reviewed ship, newest first (verified live 2026-10-02). It is the cheapest way to answer
+# "has a human finished with this ship, what did they decide, and why" — one request per
+# ship via ``search=<ship id>``, or up to 500 rows in one request without it.
+#
+# Markup contract (verified live 2026-10-02):
+#
+# - Rows are plain ``<tr>`` (no class) with ``ship-queue__cell-project``,
+#   ``ship-queue__cell-feedback`` and ``ship-queue__cell-status`` cells. The header row uses
+#   ``<th>``. The same rows are also rendered as ``<a class="ship-queue__card">`` for narrow
+#   screens, so parsing is scoped to ``<tr>`` to avoid counting every ship twice.
+# - Per row: ``ship-queue__project-title``, ``ship-queue__project-id`` (``#15895``), a
+#   ``ship-queue__project-meta`` line of ``by <author>`` / ``reviewed by <name>`` /
+#   ``<n> minutes ago``, the reviewer's feedback (truncated by the page), and a
+#   ``status-pill status-pill--approved|returned`` pill.
+# - Stardance has no "rejected" outcome: a negative review *is* "returned".
+# - ``limit`` is honoured well past the default 25 (500 rows ≈ 60 KB in one request), and
+#   ``search`` takes a *bare* ship id (``search=15895``); a leading ``#`` matches nothing.
+# - Only relative times are printed ("3 minutes ago"), so `parse_relative_when` turns them
+#   into an approximate timestamp.
+#
+# A ship that is currently waiting does not appear here, and a reviewed ship is not waiting
+# any more, so the review log plus the pending queue together describe every ship's state.
+
+
+@dataclass(frozen=True, slots=True)
+class ReviewLogEntry:
+    ship_id: str
+    title: str
+    author: str
+    decision: str  # "approved" | "returned"
+    reviewed_by: str = ""
+    when_text: str = ""
+    feedback: str = ""
+
+
+_WHEN_RE = re.compile(r"(\d+)\s+(minute|hour|day|month|year)s?\s+ago", re.I)
+_META_BY_AUTHOR = re.compile(r"^by\s+(.*)$", re.I)
+_META_BY_REVIEWER = re.compile(r"^reviewed by\s+(.*)$", re.I)
+_WHEN_SECONDS = {
+    "minute": 60,
+    "hour": 3600,
+    "day": 86400,
+    "month": 2592000,
+    "year": 31536000,
+}
+
+
+def parse_relative_when(text: str, *, now: datetime | None = None) -> str | None:
+    """Turn "3 minutes ago" into an approximate ISO timestamp (the page has nothing better)."""
+    match = _WHEN_RE.search(text or "")
+    if match is None:
+        return None
+    seconds = int(match.group(1)) * _WHEN_SECONDS[match.group(2).lower()]
+    moment = (now or datetime.now(UTC)) - timedelta(seconds=seconds)
+    return moment.isoformat()
+
+
+class _ReviewLogParser(HTMLParser):
+    """Pull reviewed-ship rows out of the review-log table (the card layout is ignored).
+
+    Fields are opened by the tag that carries them and closed by that tag's own end tag, so
+    nested markup (the meta line is plain ``<span>``s joined by ``\xb7`` dots) is captured by
+    accumulating text rather than by matching leaf elements.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.entries: list[ReviewLogEntry] = []
+        self._in_row = False
+        self._row: dict[str, str] = {}
+        self._cell: str = ""
+        self._field: str = ""
+        self._field_end: str = ""
+        self._buf: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag == "tr":
+            self._in_row = True
+            self._row, self._cell, self._field, self._field_end, self._buf = {}, "", "", "", []
+            return
+        if not self._in_row:
+            return
+        classes = dict(attrs).get("class") or ""
+        if tag == "td":
+            self._cell = classes
+            if "ship-queue__cell-feedback" in classes:
+                self._open("feedback", tag)
+            return
+        if "status-pill--" in classes:
+            self._row["decision"] = classes.split("status-pill--", 1)[1].split()[0]
+            return
+        if "ship-queue__project-title" in classes:
+            self._open("title", tag)
+        elif "ship-queue__project-id" in classes:
+            self._open("ship_id", tag)
+        elif "ship-queue__project-meta" in classes:
+            self._open("meta", tag)
+
+    def _open(self, field: str, tag: str) -> None:
+        if not self._field:
+            self._field, self._field_end, self._buf = field, tag, []
+
+    def handle_data(self, data: str) -> None:
+        if self._in_row and self._field:
+            self._buf.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "tr":
+            self._close_row()
+            return
+        if not self._in_row:
+            return
+        if self._field and tag == self._field_end:
+            text = _clean("".join(self._buf))
+            if self._field == "ship_id":
+                text = _PROJECT_ID_RE.sub(r"\1", text)
+            self._row[self._field] = text
+            self._field, self._field_end, self._buf = "", "", []
+
+    def _close_row(self) -> None:
+        self._in_row = False
+        self._field, self._field_end, self._buf = "", "", []
+        self._cell = ""
+        ship_id = self._row.get("ship_id", "")
+        decision = self._row.get("decision", "")
+        if not ship_id or not decision:
+            return  # the header row, or markup we do not recognise
+        author = reviewer = when = ""
+        for part in self._row.get("meta", "").split("\xb7"):
+            part = part.strip()
+            if not part:
+                continue
+            if match := _META_BY_REVIEWER.match(part):
+                reviewer = match.group(1).strip()
+            elif match := _META_BY_AUTHOR.match(part):
+                author = match.group(1).strip()
+            elif _WHEN_RE.match(part):
+                when = part
+        self.entries.append(
+            ReviewLogEntry(
+                ship_id=ship_id,
+                title=self._row.get("title", ""),
+                author=author,
+                decision=decision,
+                reviewed_by=reviewer,
+                when_text=when,
+                feedback=self._row.get("feedback", ""),
+            )
+        )
+
+
+def parse_review_log(html: str) -> list[ReviewLogEntry]:
+    """Every reviewed-ship row on one review-log page."""
+    parser = _ReviewLogParser()
+    parser.feed(html)
+    parser.close()
+    return parser.entries
+
+
 def parse_dash_cert_id(redirect_location: str) -> str:
     """Extract the Dashboard cert id from a ship-page redirect target.
 
@@ -247,6 +412,60 @@ class StardanceAdminClient:
                 f"admin queue returned HTTP {response.status_code}",
             )
         return parse_queue(response.text, page=page)
+
+    async def pending_ship_ids(self, *, limit: int = 500) -> set[str]:
+        """Every ship id currently waiting for review, in one request.
+
+        The queue page honours ``limit`` well past its default 25 (195 ids fitted in one
+        request on 2026-10-02), so this is normally one call rather than a page walk. Empty
+        is a valid answer: an empty queue means nothing is waiting, not that parsing failed.
+        """
+        response = await self._http.get(
+            "/admin/certification/ship",
+            params={"status": "pending", "sort": "newest", "limit": limit},
+            headers={"Cookie": f"{STARDANCE_COOKIE_NAME}={self._session}"},
+        )
+        self._raise_for_status(response, "pending queue")
+        page = parse_queue(response.text)
+        return {ship.ship_id for ship in page.ships if ship.ship_id}
+
+    async def review_log(
+        self, *, search: str = "", limit: int = 500, page: int = 1, status: str = "all"
+    ) -> list[ReviewLogEntry]:
+        """Reviewed ships, newest first.
+
+        ``search`` takes a *bare* ship id (``"15895"``) or a project-name fragment and returns
+        just the matches, which is how a single ship is looked up in one request. Without it
+        one request returns up to ``limit`` rows.
+
+        Walking pages is not reliable here — a ``limit=500`` walk skipped ids at the page
+        boundary on 2026-10-02 — so callers that need completeness should use ``search`` for
+        the ships they care about rather than trusting an exhaustive walk.
+        """
+        response = await self._http.get(
+            "/admin/certification/ship/logs",
+            params={
+                "status": status,
+                "sort": "newest",
+                "from": "",
+                "to": "",
+                "search": search,
+                "limit": limit,
+                "page": page,
+            },
+            headers={"Cookie": f"{STARDANCE_COOKIE_NAME}={self._session}"},
+        )
+        self._raise_for_status(response, "review log")
+        return parse_review_log(response.text)
+
+    def _raise_for_status(self, response: httpx.Response, what: str) -> None:
+        if response.is_redirect:
+            raise StardanceAdminError(
+                f"{what} redirected (to {response.headers.get('location', '?')}) — "
+                "session cookie likely expired",
+            )
+        if response.status_code >= 400:
+            raise StardanceAdminError(f"{what} returned HTTP {response.status_code}")
 
     async def ship_redirect_target(self, ship_id: str) -> str | None:
         """Probe one admin ship page for a Dashboard redirect.

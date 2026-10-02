@@ -221,6 +221,66 @@ class Settings(BaseSettings):
     )
     extension_usage_file: Path = Path("data/extension_usage.json")
     extension_api_port: int = Field(default=8765, ge=1024, le=65535)
+    status_refresh_enabled: bool = Field(
+        default=True,
+        description=(
+            "Track whether a human has reviewed each judged ship, from Stardance's pending "
+            "queue and review log. This is what keeps decided ships out of the Clanker queue. "
+            "Needs STARDANCE_SESSION. Only runs when someone reads /api/results."
+        ),
+    )
+    status_refresh_interval: float = Field(
+        default=300.0,
+        ge=30.0,
+        description="Minimum seconds between ship-state refresh passes.",
+    )
+    status_refresh_log_limit: int = Field(
+        default=50,
+        ge=25,
+        description="Review-log rows per cache-update request.",
+    )
+    status_cache_file: Path = Field(
+        default=Path("data/review_log_cache.json"),
+        description="Local copy of Stardance's review log, so a ship's review is normally "
+        "already known and costs no request.",
+    )
+    status_cache_max_pages: int = Field(
+        default=4,
+        ge=1,
+        description=(
+            "Pages of review-log rows one cache update may fetch. More than one is only needed "
+            "when a page partly overlaps the cache, i.e. fewer than STATUS_REFRESH_LOG_LIMIT "
+            "reviews happened since the last update."
+        ),
+    )
+    status_cache_interval: float = Field(
+        default=1800.0,
+        ge=60.0,
+        description=(
+            "Seconds between background reconciliations (cache update plus a queue pass), so "
+            "the queue stays correct even when nobody has the extension open."
+        ),
+    )
+    status_startup_sweep: bool = Field(
+        default=True,
+        description=(
+            "On boot, pull further into the review log and re-check every tracked ship, so a "
+            "restart cannot leave decided ships sitting in the Clanker queue."
+        ),
+    )
+    status_startup_pages: int = Field(
+        default=20,
+        ge=1,
+        description="Review-log pages the boot sweep may fetch (20 x 50 rows covers days).",
+    )
+    status_refresh_backfill: int = Field(
+        default=40,
+        ge=0,
+        description=(
+            "Ships per pass to look up individually when the cache has no review for them. "
+            "0 disables the individual lookups."
+        ),
+    )
     github_token: str = Field(
         default="", description="Optional; raises GitHub API rate limits for review tools."
     )

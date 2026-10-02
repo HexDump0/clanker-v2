@@ -15,6 +15,8 @@ src/clanker/
 ├── watcher.py       polls the PENDING queue; seen-state persists to disk
 ├── forges.py        repo-host URLs (GitHub, GitLab, Codeberg/Gitea, Bitbucket,
 │                    sourcehut): raw/blob links, README fetch
+├── status.py        keeps each result's "what a human did with this ship" fresh, from
+│                    Stardance's pending queue + review log (what empties the queue)
 ├── review/
 │   ├── packet.py    pre-fetches detail + cached GitHub + README + prior reviews
 │   ├── first_layer/ default reviewer: code facts + one Jev call → REJECT
@@ -80,6 +82,25 @@ The screenshot-first review-video pipeline accepts review-owned evidence URLs an
 findings. It makes one call to `VIDEO_DIRECTOR_MODEL_NAME`, then resolves the model's
 optional exact text against the captured DOM. Missing or ambiguous text produces a
 bottom-right callout with no highlight. Rendering requires `ffmpeg` and `ffprobe`.
+
+## The Clanker queue
+
+Two tabs over the same records. **Clanker queue** is the ships a human still has to act on —
+Clanker's own verdict (reject / approve / needs human) never removes a ship from it. **All
+data** is every ship Clanker has ever judged, including the ones already settled.
+
+What empties the queue is a human's decision, read from Stardance: its pending queue and its
+review log (`/admin/certification/ship/logs`, which records `approved` / `returned` plus who
+reviewed, when and their feedback). The log only grows, so `clanker.status` keeps a local copy
+(`data/review_log_cache.json`): a routine update fetches the newest 50 rows and stops when the
+page added nothing new, following the next page only when a page overlapped what it holds.
+A pass is **one request** — the waiting set — because settled and still-waiting ships are
+answered without touching the log at all.
+
+It reconciles every 30 minutes in the background, on demand when the extension reads
+`/api/results`, and sweeps once at boot (pulling further into the log and re-checking every
+tracked ship), so a restart cannot leave decided ships sitting in the queue. It needs
+`STARDANCE_SESSION`; see `.env.example` for the settings.
 
 The checked-in ferrocompiler benchmark can be rendered without a model call:
 

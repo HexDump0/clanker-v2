@@ -3,7 +3,13 @@ html, body { height: 100%; margin: 0; }
 body { background: var(--panel); }
 .app { min-height: 100%; padding: 28px 32px 36px; display: flex; flex-direction: column; gap: 16px; }
 
-/* top: stats bar + actions */
+/* top: tabs, stats bar + actions */
+.tabs { display: inline-flex; gap: 2px; border: 1px solid var(--edge-subtle); border-radius: 10px; padding: 3px; background: color-mix(in srgb, white 2%, transparent); align-self: flex-start; }
+.tab { display: inline-flex; align-items: center; gap: 8px; border: 0; border-radius: 7px; padding: 7px 14px; background: transparent; color: var(--ink-dim); font: inherit; font-size: 13px; cursor: pointer; }
+.tab:hover { color: var(--ink-2); }
+.tab.on { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--ink-strong); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent); }
+.tab .n { font-size: 11px; color: var(--ink-muted); font-variant-numeric: tabular-nums; }
+.tab.on .n { color: var(--accent); }
 .topbar { display: flex; align-items: stretch; gap: 16px; flex-wrap: wrap; }
 .statbar { display: flex; flex-wrap: wrap; border: 1px solid var(--edge-subtle); border-radius: 12px; overflow: hidden; }
 .sb { padding: 12px 20px; border-left: 1px solid var(--edge-subtle); min-width: 96px; }
@@ -18,11 +24,12 @@ body { background: var(--panel); }
 /* filters */
 .filters { border: 1px solid var(--edge-subtle); border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
 .frow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.filters .hint { font-size: 12px; color: var(--ink-muted); }
 .search { margin-left: auto; width: 260px; max-width: 100%; }
 
 /* table */
 .table { border: 1px solid var(--edge-subtle); border-radius: 12px; overflow: hidden; }
-.tr { display: grid; grid-template-columns: minmax(140px, 2fr) 120px minmax(160px, 3fr) 90px 110px; gap: 12px; align-items: center;
+.tr { display: grid; grid-template-columns: minmax(130px, 2fr) 132px 104px minmax(130px, 3fr) 86px 104px; gap: 12px; align-items: center;
   padding: 11px 18px; border-top: 1px solid var(--edge-subtle); cursor: pointer; width: 100%; text-align: left; background: transparent;
   color: var(--ink); font: inherit; font-size: 13px; border-left: 0; border-right: 0; border-bottom: 0; }
 .tr:hover { background: color-mix(in srgb, white 3%, transparent); }
@@ -62,7 +69,7 @@ dialog::backdrop { background: rgba(0,0,0,.55); }
 .dlg .row-actions { justify-content: flex-end; }
 .help { font-size: 12px; color: var(--ink-dim); }
 
-@media (max-width: 900px) { .dgrid { grid-template-columns: 1fr; } .tr { grid-template-columns: minmax(120px, 2fr) 100px minmax(100px, 2fr) 80px; } .tr > :nth-child(5) { display: none; } }
-@media (max-width: 620px) { .app { padding: 16px 12px 28px; } .tr { grid-template-columns: 1fr 96px; } .tr > :nth-child(n+3) { display: none; } .search { margin-left: 0; width: 100%; } .sb { padding: 10px 14px; min-width: 0; } }
+@media (max-width: 900px) { .dgrid { grid-template-columns: 1fr; } .tr { grid-template-columns: minmax(120px, 2fr) 100px 100px minmax(100px, 2fr); } .tr > :nth-child(5) { display: none; } }
+@media (max-width: 620px) { .app { padding: 16px 12px 28px; } .tr { grid-template-columns: 1fr 96px; } .tr > :nth-child(n+3) { display: none; } .search { margin-left: 0; width: 100%; } .sb { padding: 10px 14px; min-width: 0; } .tab { padding: 6px 10px; font-size: 12.5px; } }
 
 .fb-text { min-height: 150px; font-size: 13.5px !important; line-height: 1.6 !important; }

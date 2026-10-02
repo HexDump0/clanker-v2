@@ -13,6 +13,7 @@ import json
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 from slack_sdk.web.async_client import AsyncWebClient
 
@@ -28,6 +29,10 @@ from clanker.shipwrights import CertStatus, ShipwrightsClient
 from clanker.slack.announcer import Announcer
 from clanker.slack.memory import MemoryStore
 from clanker.watcher import PendingEmission, Watcher, make_pending_source
+
+if TYPE_CHECKING:
+    from clanker.results import ResultStore
+    from clanker.status import StatusRefresher
 
 logger = logging.getLogger(__name__)
 
@@ -354,6 +359,7 @@ async def _supervise(name: str, factory, *args) -> None:
 async def run_all(settings: Settings) -> None:
     configure_observability(settings)
     ctx = build_app(settings)
+    refreshers: list[StatusRefresher] = []
     logger.info("Starting clanker v2 services")
     try:
         async with asyncio.TaskGroup() as tg:
@@ -363,14 +369,23 @@ async def run_all(settings: Settings) -> None:
                 from clanker.api import run_extension_api
                 from clanker.results import ResultStore
 
+                store = ResultStore(settings.results_dir)
+                refresher = _build_refresher(settings, store)
+                if refresher is not None:
+                    refreshers.append(refresher)
+                    tg.create_task(
+                        run_status_service(refresher, sweep=settings.status_startup_sweep),
+                        name="status",
+                    )
                 tg.create_task(
                     _supervise(
                         "extension-api",
                         run_extension_api,
                         settings,
-                        ResultStore(settings.results_dir),
+                        store,
                         lambda cert_id, who: review_for_extension(ctx, cert_id, who),
                         lambda record: flag_manual_review(ctx, record),
+                        refresher.maybe_refresh if refresher else None,
                     ),
                     name="extension-api",
                 )
@@ -382,3 +397,68 @@ async def run_all(settings: Settings) -> None:
     finally:
         await ctx.client.close()
         await ctx.tools.aclose()
+        for refresher in refreshers:
+            await refresher.aclose()
+
+
+def _build_refresher(settings: Settings, store: ResultStore) -> StatusRefresher | None:
+    """The ship-state refresher, when it has what it needs: a Stardance session.
+
+    Returns None (and says why) rather than silently serving a queue that can never tell a
+    decided ship from a waiting one.
+    """
+    from clanker.stardance import StardanceAdminClient
+    from clanker.status import ReviewLogCache, StatusRefresher
+
+    if not settings.status_refresh_enabled:
+        return None
+    if not settings.stardance_session:
+        logger.warning(
+            "STATUS_REFRESH_ENABLED is on but STARDANCE_SESSION is not set, so the Clanker "
+            "queue cannot tell which ships a human has already reviewed"
+        )
+        return None
+    cache = ReviewLogCache(settings.status_cache_file)
+    cache.load()
+    return StatusRefresher(
+        StardanceAdminClient(settings.stardance_session),
+        store,
+        cache=cache,
+        interval=settings.status_refresh_interval,
+        log_limit=settings.status_refresh_log_limit,
+        cache_max_pages=settings.status_cache_max_pages,
+        cache_interval=settings.status_cache_interval,
+        startup_pages=settings.status_startup_pages,
+        backfill_limit=settings.status_refresh_backfill,
+    )
+
+
+async def run_status_service(refresher: StatusRefresher, *, sweep: bool = True) -> None:
+    """Keep the Clanker queue correct in the background.
+
+    Ships get approved and returned while nobody is looking at the extension, and while the bot
+    is down entirely, so the queue cannot be left to whoever opens the page next. This sweeps
+    once at boot — a restart must not leave decided ships sitting in the queue — and then
+    reconciles on a timer.
+    """
+    if sweep:
+        try:
+            await refresher.startup_sweep()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Startup sweep failed; the queue catches up on the next pass")
+    logger.info(
+        "Background reconciliation every %.0f s (on-demand passes every %.0f s)",
+        refresher.cache_interval,
+        refresher.interval,
+    )
+    while True:
+        await asyncio.sleep(min(refresher.cache_interval, 60.0))
+        try:
+            await refresher.sync_cache(interval=refresher.cache_interval)
+            await refresher.reconcile()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Ship review state reconciliation failed")
