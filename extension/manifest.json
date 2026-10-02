@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Clanker for Shipwrights",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Clanker's reviews inside the Shipwrights dashboard.",
   "permissions": [
     "cookies",
